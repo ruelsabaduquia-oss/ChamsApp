@@ -426,7 +426,8 @@ async function handleFileUpload(event) {
   const headers = rows.shift()?.map(normalizeHeader) || [];
   const skuIndex = headers.findIndex((header) => ["sku code", "sku", "code"].includes(header));
   const descIndex = headers.findIndex((header) => ["description", "desc", "item description"].includes(header));
-  const qtyIndex = headers.findIndex((header) => ["qty", "quantity", "count", "stock"].includes(header));
+  const qtyIndex = headers.findIndex((header) => ["qty", "quantity", "count"].includes(header));
+  const stockIndex = headers.findIndex((header) => ["stock", "stock qty", "stock quantity", "inventory", "inventory qty", "on hand", "stock on hand"].includes(header));
   const barcodeIndex = headers.findIndex((header) => ["barcode", "bar code", "upc", "ean"].includes(header));
   const priceIndex = headers.findIndex((header) => ["price", "selling price", "retail price", "srp", "unit price"].includes(header));
   const keepBaseline = getInitStrategy() === "baseline";
@@ -443,7 +444,8 @@ async function handleFileUpload(event) {
       keepBaseline && qtyIndex !== -1 ? row[qtyIndex] : 0,
       keepBaseline,
       barcodeIndex !== -1 ? row[barcodeIndex] : "",
-      priceIndex !== -1 ? row[priceIndex] : ""
+      priceIndex !== -1 ? row[priceIndex] : "",
+      stockIndex !== -1 ? row[stockIndex] : null
     );
   });
 
@@ -468,11 +470,12 @@ function handleManualAdd(event) {
   render();
 }
 
-function upsertSku(code, description, qty = null, saved = null, barcode = "", price = "") {
+function upsertSku(code, description, qty = null, saved = null, barcode = "", price = "", stockQty = null) {
   const cleanCode = String(code || "").trim();
   const cleanDescription = String(description || "").trim();
   const cleanBarcode = String(barcode || "").trim();
   const cleanPrice = sanitizeMoney(price);
+  const cleanStockQty = parseOptionalStockQty(stockQty);
   const shouldSetQty = qty !== null;
   const cleanQty = shouldSetQty ? sanitizeQty(qty) : 0;
   if (!cleanCode || !cleanDescription) return false;
@@ -482,6 +485,7 @@ function upsertSku(code, description, qty = null, saved = null, barcode = "", pr
     existing.description = cleanDescription;
     existing.barcode = cleanBarcode || existing.barcode || "";
     if (cleanPrice > 0) existing.price = cleanPrice;
+    if (cleanStockQty !== null) existing.stockQty = cleanStockQty;
     if (shouldSetQty) existing.qty = cleanQty;
     if (saved !== null) {
       existing.saved = Boolean(saved);
@@ -495,6 +499,7 @@ function upsertSku(code, description, qty = null, saved = null, barcode = "", pr
     description: cleanDescription,
     barcode: cleanBarcode,
     price: cleanPrice,
+    stockQty: cleanStockQty,
     qty: cleanQty,
     saved: Boolean(saved),
     updatedAt: saved ? new Date().toISOString() : null,
@@ -1261,13 +1266,23 @@ function addPosItemByCode(code, source = "quick", savedPrice = 0) {
     return;
   }
 
+  const existing = posSession.cart.find((line) => line.code === item.code);
+  const stockQty = getStockQty(item);
+  const cartQty = Number(existing?.qty || 0);
+  if (stockQty !== null && stockQty <= cartQty) {
+    elements.posScanStatus.textContent = "OUT OF INVENTORY";
+    alert(`Out of inventory.\n${item.description}\nAvailable stock: ${stockQty.toLocaleString()}`);
+    triggerHaptic();
+    playScanBeep(180, 180);
+    return;
+  }
+
   const price = sanitizeMoney(savedPrice) || ensurePosPrice(item);
   if (price === null) {
     elements.posScanStatus.textContent = "PRICE REQUIRED";
     return;
   }
 
-  const existing = posSession.cart.find((line) => line.code === item.code);
   if (existing) {
     existing.qty = Number(existing.qty || 0) + 1;
   } else {
@@ -1308,7 +1323,19 @@ function ensurePosPrice(item) {
 function updatePosLineQty(code, value) {
   const line = posSession.cart.find((item) => item.code === code);
   if (!line) return;
-  line.qty = Math.max(1, sanitizeQty(value));
+  const item = inventory.find((sku) => sku.code === code);
+  const stockQty = getStockQty(item);
+  const requestedQty = Math.max(1, sanitizeQty(value));
+  if (stockQty !== null && requestedQty > stockQty) {
+    alert(`Not enough inventory.\n${line.description}\nAvailable stock: ${stockQty.toLocaleString()}`);
+    if (stockQty <= 0) {
+      removePosLine(code);
+      return;
+    }
+    line.qty = stockQty;
+  } else {
+    line.qty = requestedQty;
+  }
   savePosSession();
   renderPosCart();
 }
@@ -1496,6 +1523,7 @@ async function completePosSale() {
     items: posSession.cart.map((line) => ({ ...line })),
   };
   posSession.sales.unshift(sale);
+  deductInventoryStock(sale.items);
   posSession.cart = [];
   posSession.transactionActive = false;
   posSession.currentTransactionId = "";
@@ -1510,6 +1538,18 @@ async function completePosSale() {
   } else {
     alert(`Credit/Debit Card payment recorded.\nTotal: ${formatMoney(total)}\nReference: ${payment.reference}`);
   }
+}
+
+function deductInventoryStock(items) {
+  let changed = false;
+  items.forEach((line) => {
+    const item = inventory.find((sku) => sku.code === line.code);
+    const stockQty = getStockQty(item);
+    if (!item || stockQty === null) return;
+    item.stockQty = Math.max(0, stockQty - Number(line.qty || 0));
+    changed = true;
+  });
+  if (changed) saveInventory();
 }
 
 function collectPosPayment(total) {
@@ -1858,7 +1898,7 @@ async function downloadProductsFromCloud(options = {}) {
 
     while (true) {
       const products = await supabaseRequest(
-        `/rest/v1/products?select=sku_code,barcode,description,price&is_active=eq.true&order=sku_code.asc`,
+        `/rest/v1/products?select=sku_code,barcode,description,price,stock_qty&is_active=eq.true&order=sku_code.asc`,
         {
           headers: {
             Range: `${offset}-${offset + batchSize - 1}`,
@@ -1867,7 +1907,7 @@ async function downloadProductsFromCloud(options = {}) {
       );
 
       products.forEach((product) => {
-        if (upsertSku(product.sku_code, product.description, null, null, product.barcode || "", product.price || 0)) {
+        if (upsertSku(product.sku_code, product.description, null, null, product.barcode || "", product.price || 0, product.stock_qty)) {
           updated += 1;
         }
       });
@@ -2704,6 +2744,16 @@ function normalizeHeader(value) {
 
 function sanitizeQty(value) {
   return Math.max(0, Math.floor(Number(value || 0)));
+}
+
+function parseOptionalStockQty(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  return sanitizeQty(value);
+}
+
+function getStockQty(item) {
+  if (!item || item.stockQty === null || item.stockQty === undefined || item.stockQty === "") return null;
+  return sanitizeQty(item.stockQty);
 }
 
 function sanitizeMoney(value) {
