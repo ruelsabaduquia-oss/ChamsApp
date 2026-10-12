@@ -592,13 +592,13 @@ async function scanLoop() {
 }
 
 function handleScannedCode(rawCode, source = "manual") {
-  const cleanCode = String(rawCode || "").trim();
+  const cleanCode = normalizeBarcode(rawCode);
   if (!cleanCode) return;
 
-  const matched = inventory.find((item) => item.barcode === cleanCode || item.code === cleanCode);
+  const matched = inventory.find((item) => normalizeBarcode(item.barcode) === cleanCode || normalizeBarcode(item.code) === cleanCode);
 
   if (!matched) {
-    elements.scanStatus.textContent = `UNKNOWN ${cleanCode}`;
+    elements.scanStatus.textContent = source === "manual" ? `TYPED UNKNOWN ${cleanCode}` : `UNKNOWN ${cleanCode}`;
     triggerHaptic();
     playScanBeep(180, 180);
     return;
@@ -610,7 +610,7 @@ function handleScannedCode(rawCode, source = "manual") {
   matched.updatedAt = new Date().toISOString();
   saveInventory();
   render();
-  elements.scanStatus.textContent = `MATCHED ${matched.code}`;
+  elements.scanStatus.textContent = source === "manual" ? `TYPED MATCH ${matched.code}` : `MATCHED ${matched.code}`;
   triggerHaptic();
   playScanBeep();
 }
@@ -1247,6 +1247,13 @@ function normalizeHeader(value) {
 
 function sanitizeQty(value) {
   return Math.max(0, Math.floor(Number(value || 0)));
+}
+
+function normalizeBarcode(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[\s-]+/g, "")
+    .toUpperCase();
 }
 
 function csvCell(value) {

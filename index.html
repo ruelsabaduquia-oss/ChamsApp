@@ -218,11 +218,15 @@
               <button class="secondary-button" id="stopScanButton" type="button" hidden>Stop</button>
             </div>
             <form class="barcode-fallback" id="barcodeFallbackForm">
+              <div class="manual-barcode-head">
+                <strong>Damaged / Faded Barcode</strong>
+                <small>Type the barcode number printed under the bars.</small>
+              </div>
               <label>
-                <span>Manual Barcode</span>
-                <input id="barcodeInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Enter barcode if camera scan is unavailable" />
+                <span>Barcode Number</span>
+                <input id="barcodeInput" type="text" inputmode="text" autocomplete="off" enterkeyhint="done" placeholder="Type barcode or SKU code" />
               </label>
-              <button class="secondary-button" type="submit">Add Scanned Item</button>
+              <button class="secondary-button" type="submit">Count Typed Barcode</button>
             </form>
           </div>
 
