@@ -61,6 +61,7 @@ button {
 .home-hero,
 .module-card,
 .pos-hero,
+.sync-hero,
 .pos-register,
 .pos-cart {
   background: var(--surface);
@@ -106,7 +107,9 @@ button {
 }
 
 .home-hero span,
-.pos-hero span {
+.pos-hero span,
+.sync-hero span,
+.sync-grid span {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 900;
@@ -115,12 +118,14 @@ button {
 }
 
 .home-hero h2,
-.pos-hero h2 {
+.pos-hero h2,
+.sync-hero h2 {
   font-size: 1.35rem;
 }
 
 .home-hero p,
-.pos-hero p {
+.pos-hero p,
+.sync-hero p {
   color: var(--muted);
   font-size: 0.86rem;
 }
@@ -1529,6 +1534,16 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+.sync-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background: #ecfdf5;
+}
+
 #posStatusBadge {
   padding: 5px 9px;
   border-radius: 9999px;
@@ -1540,16 +1555,43 @@ button:disabled {
   text-transform: uppercase;
 }
 
+#syncStatusBadge {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: var(--success);
+  border: 1px solid #a7f3d0;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .pos-register {
   display: grid;
   gap: 12px;
   padding: 14px;
 }
 
+.sync-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 .pos-kpis {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
+}
+
+.sync-grid article {
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
 }
 
 .pos-kpis article {
@@ -1572,6 +1614,20 @@ button:disabled {
   font-family: "Space Grotesk", Inter, ui-sans-serif, system-ui, sans-serif;
   font-size: 1.1rem;
   font-variant-numeric: tabular-nums;
+}
+
+.sync-grid strong {
+  display: block;
+  margin-top: 5px;
+  font-family: "Space Grotesk", Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-actions {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
 }
 
 .compact-stage {

@@ -63,6 +63,10 @@
             <strong>POS</strong>
             <span>Crew login, float, sales, X/Y reading</span>
           </button>
+          <button class="module-card" id="openSyncButton" type="button">
+            <strong>Cloud Sync</strong>
+            <span>Download products and upload completed sales</span>
+          </button>
         </div>
       </section>
 
@@ -530,6 +534,41 @@
             <button class="secondary-button" id="posXReadingButton" type="button">X Reading</button>
             <button class="secondary-button danger" id="posYReadingButton" type="button">Y Reading / Close Shift</button>
           </section>
+        </section>
+      </section>
+
+      <section class="panel" id="syncPanel">
+        <div class="sync-hero">
+          <div>
+            <span>Supabase Cloud</span>
+            <h2>Cloud Sync</h2>
+            <p>Update phone products and send completed POS sales to the server.</p>
+          </div>
+          <strong id="syncStatusBadge">Ready</strong>
+        </div>
+
+        <section class="sync-grid">
+          <article>
+            <span>Phone Products</span>
+            <strong id="syncProductCount">0</strong>
+          </article>
+          <article>
+            <span>Unsynced Sales</span>
+            <strong id="syncPendingSales">0</strong>
+          </article>
+        </section>
+
+        <section class="setup-card">
+          <div class="section-heading">
+            <h2>Sync Actions</h2>
+            <span id="syncLastRun">Never synced</span>
+          </div>
+          <div class="sync-actions">
+            <button class="primary-button" id="syncAllButton" type="button">Sync Now</button>
+            <button class="secondary-button" id="downloadProductsButton" type="button">Download Products</button>
+            <button class="secondary-button" id="uploadSalesButton" type="button">Upload Sales</button>
+          </div>
+          <div class="saved-audit-details" id="syncDetails">Ready to connect to Supabase.</div>
         </section>
       </section>
 

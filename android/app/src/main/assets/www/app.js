@@ -4,12 +4,17 @@ const AUDITOR_KEY = "storecount_auditor_v1";
 const AUDIT_HISTORY_KEY = "storecount_audit_history_v1";
 const APP_USER_KEY = "storecount_app_user_v1";
 const POS_SESSION_KEY = "storecount_pos_session_v1";
+const SYNC_STATE_KEY = "storecount_sync_state_v1";
+const SUPABASE_URL = "https://nzgdfygljemhapabbsnf.supabase.co";
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56Z2RmeWdsamVtaGFwYWJic25mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3NzY2ODksImV4cCI6MjEwNzM1MjY4OX0.MRcXcfy3RFY93VwKDEUIBhQiwAOmireZo4-Kk-N617g";
 
 let inventory = loadInventory();
 let branchName = loadBranchName();
 let auditorName = loadAuditorName();
 let auditHistory = loadAuditHistory();
 let appUser = loadAppUser();
+let syncState = loadSyncState();
 let activeModule = appUser ? "home" : "login";
 let posSession = loadPosSession();
 let viewingSavedAuditId = "";
@@ -49,6 +54,7 @@ const elements = {
   homeButton: $("#homeButton"),
   openStoreCountButton: $("#openStoreCountButton"),
   openPosButton: $("#openPosButton"),
+  openSyncButton: $("#openSyncButton"),
   storeCountChrome: document.querySelectorAll(".storecount-chrome"),
   tabs: document.querySelectorAll(".tab"),
   panels: {
@@ -56,6 +62,7 @@ const elements = {
     count: $("#countPanel"),
     report: $("#reportPanel"),
     pos: $("#posPanel"),
+    sync: $("#syncPanel"),
   },
   totalSku: $("#totalSku"),
   countedSku: $("#countedSku"),
@@ -155,6 +162,14 @@ const elements = {
   posYReadingButton: $("#posYReadingButton"),
   posReadingLabel: $("#posReadingLabel"),
   posReadingDetails: $("#posReadingDetails"),
+  syncStatusBadge: $("#syncStatusBadge"),
+  syncProductCount: $("#syncProductCount"),
+  syncPendingSales: $("#syncPendingSales"),
+  syncLastRun: $("#syncLastRun"),
+  syncDetails: $("#syncDetails"),
+  syncAllButton: $("#syncAllButton"),
+  downloadProductsButton: $("#downloadProductsButton"),
+  uploadSalesButton: $("#uploadSalesButton"),
 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -172,6 +187,7 @@ function bindEvents() {
   elements.homeButton.addEventListener("click", () => showModuleHome());
   elements.openStoreCountButton.addEventListener("click", () => showStoreCount());
   elements.openPosButton.addEventListener("click", () => showPos());
+  elements.openSyncButton.addEventListener("click", () => showSync());
 
   elements.tabs.forEach((tab) => {
     tab.addEventListener("click", () => setTab(tab.dataset.tab));
@@ -271,6 +287,9 @@ function bindEvents() {
   elements.posClearCartButton.addEventListener("click", clearPosCart);
   elements.posXReadingButton.addEventListener("click", () => renderPosReading("X"));
   elements.posYReadingButton.addEventListener("click", closePosShift);
+  elements.syncAllButton.addEventListener("click", syncAll);
+  elements.downloadProductsButton.addEventListener("click", downloadProductsFromCloud);
+  elements.uploadSalesButton.addEventListener("click", uploadSalesToCloud);
 
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -328,6 +347,7 @@ function renderAppShell() {
   elements.appShell.hidden = !loggedIn;
   if (!loggedIn) return;
   if (activeModule === "pos") showPos();
+  else if (activeModule === "sync") showSync();
   else if (activeModule === "storecount") showStoreCount();
   else showModuleHome();
 }
@@ -361,6 +381,19 @@ function showPos() {
   });
   updateScreenTitle("POS");
   renderPos();
+}
+
+function showSync() {
+  activeModule = "sync";
+  stopScanner();
+  stopPosScanner();
+  elements.homePanel.classList.remove("is-active");
+  elements.storeCountChrome.forEach((item) => (item.hidden = true));
+  Object.entries(elements.panels).forEach(([key, panel]) => {
+    panel.classList.toggle("is-active", key === "sync");
+  });
+  updateScreenTitle("Cloud Sync");
+  renderSync();
 }
 
 function updateScreenTitle(title) {
@@ -460,6 +493,7 @@ function render() {
   renderSavedAudits();
   renderSelectedSku();
   renderPos();
+  renderSync();
 }
 
 function renderCatalogPreview() {
@@ -1240,6 +1274,230 @@ function closePosShift() {
   renderPos();
 }
 
+function renderSync() {
+  if (!elements.syncProductCount) return;
+
+  const pendingSales = getPendingSales();
+  elements.syncProductCount.textContent = inventory.length.toLocaleString();
+  elements.syncPendingSales.textContent = pendingSales.length.toLocaleString();
+  elements.syncLastRun.textContent = syncState.lastRunAt ? `Last sync: ${formatAuditDate(syncState.lastRunAt)}` : "Never synced";
+  elements.syncStatusBadge.textContent = pendingSales.length ? "Pending" : "Ready";
+  elements.syncDetails.textContent =
+    syncState.lastMessage || "Download product updates before selling, then upload completed POS sales when internet is available.";
+}
+
+async function syncAll() {
+  setSyncBusy(true, "Syncing...");
+  try {
+    const download = await downloadProductsFromCloud({ silent: true });
+    const upload = await uploadSalesToCloud({ silent: true });
+    setSyncMessage(`Sync complete. Products updated: ${download.updated}. Sales uploaded: ${upload.uploaded}.`);
+  } catch (error) {
+    setSyncMessage(`Sync failed: ${error.message}`);
+    alert(`Sync failed.\n${error.message}`);
+  } finally {
+    setSyncBusy(false);
+  }
+}
+
+async function downloadProductsFromCloud(options = {}) {
+  if (!options.silent) setSyncBusy(true, "Downloading products...");
+
+  try {
+    const batchSize = 1000;
+    let offset = 0;
+    let updated = 0;
+
+    while (true) {
+      const products = await supabaseRequest(
+        `/rest/v1/products?select=sku_code,barcode,description,price&is_active=eq.true&order=sku_code.asc`,
+        {
+          headers: {
+            Range: `${offset}-${offset + batchSize - 1}`,
+          },
+        }
+      );
+
+      products.forEach((product) => {
+        if (upsertSku(product.sku_code, product.description, null, null, product.barcode || "", product.price || 0)) {
+          updated += 1;
+        }
+      });
+
+      if (products.length < batchSize) break;
+      offset += batchSize;
+    }
+
+    saveInventory();
+    render();
+    setSyncMessage(`Product download complete. ${updated.toLocaleString()} product records updated on this phone.`);
+    await writeSyncLog("download_products", "success", `${updated} products downloaded`);
+    return { updated };
+  } catch (error) {
+    setSyncMessage(`Product download failed: ${error.message}`);
+    await writeSyncLog("download_products", "failed", error.message);
+    if (!options.silent) alert(`Product download failed.\n${error.message}`);
+    throw error;
+  } finally {
+    if (!options.silent) setSyncBusy(false);
+  }
+}
+
+async function uploadSalesToCloud(options = {}) {
+  if (!options.silent) setSyncBusy(true, "Uploading sales...");
+
+  try {
+    const pendingSales = getPendingSales();
+    let uploaded = 0;
+
+    for (const sale of pendingSales) {
+      const cloudSale = await uploadOneSale(sale);
+      sale.syncedAt = new Date().toISOString();
+      sale.cloudSaleId = cloudSale.id;
+      uploaded += 1;
+      savePosSession();
+    }
+
+    render();
+    setSyncMessage(`Sales upload complete. ${uploaded.toLocaleString()} sale records uploaded.`);
+    await writeSyncLog("upload_sales", "success", `${uploaded} sales uploaded`);
+    return { uploaded };
+  } catch (error) {
+    savePosSession();
+    setSyncMessage(`Sales upload failed: ${error.message}`);
+    await writeSyncLog("upload_sales", "failed", error.message);
+    if (!options.silent) alert(`Sales upload failed.\n${error.message}`);
+    throw error;
+  } finally {
+    if (!options.silent) setSyncBusy(false);
+  }
+}
+
+async function uploadOneSale(sale) {
+  const transactionPayload = {
+    device_sale_id: sale.id,
+    branch_name: branchName || "Not set",
+    crew_username: sale.crew || "Unknown",
+    shift_started_at: posSession.startedAt || null,
+    sold_at: sale.createdAt || new Date().toISOString(),
+    payment_method: sale.payment?.method || "cash",
+    total: sanitizeMoney(sale.total),
+    amount_tendered: sanitizeMoney(sale.payment?.amountTendered ?? sale.total),
+    change_amount: sanitizeMoney(sale.payment?.change || 0),
+    gcash_reference: sale.payment?.reference || null,
+    raw_payload: sale,
+  };
+
+  const existing = await findCloudSale(sale.id);
+  const transaction = existing || (await insertCloudSale(transactionPayload));
+
+  if (!existing) {
+    const itemPayload = sale.items.map((item) => ({
+      sale_id: transaction.id,
+      sku_code: item.code,
+      barcode: item.barcode || null,
+      description: item.description,
+      qty: Number(item.qty || 0),
+      price: sanitizeMoney(item.price),
+      line_total: sanitizeMoney(Number(item.qty || 0) * Number(item.price || 0)),
+      raw_payload: item,
+    }));
+
+    if (itemPayload.length) {
+      await supabaseRequest("/rest/v1/sales_items", {
+        method: "POST",
+        headers: {
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify(itemPayload),
+      });
+    }
+  }
+
+  return transaction;
+}
+
+async function findCloudSale(deviceSaleId) {
+  const encodedId = encodeURIComponent(deviceSaleId);
+  const rows = await supabaseRequest(`/rest/v1/sales_transactions?select=id&device_sale_id=eq.${encodedId}&limit=1`);
+  return rows[0] || null;
+}
+
+async function insertCloudSale(payload) {
+  const rows = await supabaseRequest("/rest/v1/sales_transactions", {
+    method: "POST",
+    headers: {
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify(payload),
+  });
+  return rows[0];
+}
+
+async function writeSyncLog(syncType, status, message) {
+  try {
+    await supabaseRequest("/rest/v1/sync_logs", {
+      method: "POST",
+      headers: {
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        device_id: appUser?.username || "phone",
+        branch_name: branchName || "",
+        sync_type: syncType,
+        status,
+        message,
+      }),
+    });
+  } catch {
+    // Sync logs should never block the actual product or sales sync.
+  }
+}
+
+async function supabaseRequest(path, options = {}) {
+  const response = await fetch(`${SUPABASE_URL}${path}`, {
+    method: options.method || "GET",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+    body: options.body,
+  });
+
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const message = data?.message || data?.hint || response.statusText || "Supabase request failed.";
+    throw new Error(message);
+  }
+
+  return data || [];
+}
+
+function getPendingSales() {
+  return (posSession.sales || []).filter((sale) => !sale.syncedAt);
+}
+
+function setSyncBusy(isBusy, message = "") {
+  [elements.syncAllButton, elements.downloadProductsButton, elements.uploadSalesButton].forEach((button) => {
+    button.disabled = isBusy;
+  });
+
+  if (message) {
+    elements.syncStatusBadge.textContent = isBusy ? "Working" : "Ready";
+    elements.syncDetails.textContent = message;
+  }
+}
+
+function setSyncMessage(message) {
+  syncState.lastRunAt = new Date().toISOString();
+  syncState.lastMessage = message;
+  saveSyncState();
+  renderSync();
+}
+
 function getPosCartTotal() {
   return posSession.cart.reduce((sum, line) => sum + Number(line.qty || 0) * Number(line.price || 0), 0);
 }
@@ -1909,6 +2167,18 @@ function loadAppUser() {
     return JSON.parse(localStorage.getItem(APP_USER_KEY)) || null;
   } catch {
     return null;
+  }
+}
+
+function saveSyncState() {
+  localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(syncState));
+}
+
+function loadSyncState() {
+  try {
+    return JSON.parse(localStorage.getItem(SYNC_STATE_KEY)) || { lastRunAt: "", lastMessage: "" };
+  } catch {
+    return { lastRunAt: "", lastMessage: "" };
   }
 }
 
