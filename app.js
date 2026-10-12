@@ -529,6 +529,10 @@ function canApproveVoid(role) {
   return ["admin", "manager", "branch_head"].includes(String(role || "").toLowerCase());
 }
 
+function isAdminUser() {
+  return String(appUser?.role || "").toLowerCase() === "admin";
+}
+
 function renderCatalogPreview() {
   const sample = inventory.slice(0, 4);
   elements.previewCount.textContent = inventory.length
@@ -1118,6 +1122,10 @@ function handlePosBarcode(rawCode, source = "manual") {
 
 function renderQuickButtons() {
   elements.quickButtonCount.textContent = `${posQuickButtons.length.toLocaleString()} saved`;
+  elements.quickButtonManager.hidden = !isAdminUser();
+  if (!isAdminUser() && elements.quickButtonManager.open) {
+    elements.quickButtonManager.open = false;
+  }
   elements.quickButtonGrid.innerHTML = "";
 
   if (!posQuickButtons.length) {
@@ -1131,7 +1139,7 @@ function renderQuickButtons() {
     const savedPrice = sanitizeMoney(button.price);
     const productPrice = sanitizeMoney(item?.price);
     const tile = document.createElement("div");
-    tile.className = `quick-sale-button${elements.quickButtonManager.open ? " is-managing" : ""}`;
+    tile.className = `quick-sale-button${isAdminUser() && elements.quickButtonManager.open ? " is-managing" : ""}`;
     tile.type = "button";
     tile.innerHTML = `
       <button type="button" data-quick-sale="${escapeHtml(button.code)}">
@@ -1149,10 +1157,11 @@ function renderQuickButtons() {
   elements.quickButtonGrid.querySelectorAll("[data-quick-remove]").forEach((button) => {
     button.addEventListener("click", () => removeQuickButton(button.dataset.quickRemove));
   });
-  if (!elements.quickButtonSearchInput.value.trim()) renderQuickButtonManagerList();
+  if (isAdminUser() && !elements.quickButtonSearchInput.value.trim()) renderQuickButtonManagerList();
 }
 
 function renderQuickButtonSearchResults() {
+  if (!isAdminUser()) return;
   const query = elements.quickButtonSearchInput.value.trim().toLowerCase();
   elements.quickButtonSearchResults.innerHTML = "";
 
@@ -1195,6 +1204,7 @@ function renderQuickButtonSearchResults() {
 }
 
 function renderQuickButtonManagerList() {
+  if (!isAdminUser()) return;
   elements.quickButtonSearchResults.innerHTML = "";
 
   if (!posQuickButtons.length) {
@@ -1220,6 +1230,10 @@ function renderQuickButtonManagerList() {
 }
 
 function addQuickButton(code) {
+  if (!isAdminUser()) {
+    alert("Only Administrator can add quick buttons.");
+    return;
+  }
   const item = inventory.find((sku) => sku.code === code);
   if (!item) return;
   let price = sanitizeMoney(item.price);
@@ -1248,6 +1262,10 @@ function addQuickButton(code) {
 }
 
 function removeQuickButton(code) {
+  if (!isAdminUser()) {
+    alert("Only Administrator can remove quick buttons.");
+    return;
+  }
   const button = posQuickButtons.find((item) => item.code === code);
   if (!button) return;
   if (!confirm(`Remove quick button?\n${button.label || button.code}`)) return;
