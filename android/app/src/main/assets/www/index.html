@@ -67,6 +67,10 @@
             <strong>Cloud Sync</strong>
             <span>Download products and upload completed sales</span>
           </button>
+          <button class="module-card" id="openAdminButton" type="button">
+            <strong>Admin Setup</strong>
+            <span>Manage POS quick buttons and setup tools</span>
+          </button>
         </div>
       </section>
 
@@ -518,16 +522,6 @@
               <span id="quickButtonCount">0 saved</span>
             </div>
             <div class="quick-button-grid" id="quickButtonGrid"></div>
-            <details class="quick-button-manager" id="quickButtonManager">
-              <summary>Manage Quick Buttons</summary>
-              <form id="quickButtonForm">
-                <label>
-                  <span>Search Product</span>
-                  <input id="quickButtonSearchInput" type="search" autocomplete="off" placeholder="Search item without barcode" />
-                </label>
-                <div class="quick-search-results" id="quickButtonSearchResults"></div>
-              </form>
-            </details>
           </section>
 
           <div class="pos-cart">
@@ -599,6 +593,32 @@
           <div class="approval-list" id="voidApprovalList">
             <div class="empty-state"><strong>No pending request</strong><p>Void requests from crew will appear here.</p></div>
           </div>
+        </section>
+      </section>
+
+      <section class="panel" id="adminPanel">
+        <div class="sync-hero">
+          <div>
+            <span>Administrator</span>
+            <h2>Admin Setup</h2>
+            <p>Manage POS setup without entering cashier transaction screens.</p>
+          </div>
+          <strong id="adminStatusBadge">Admin</strong>
+        </div>
+
+        <section class="quick-sale-panel">
+          <div class="section-heading">
+            <h2>POS Quick Buttons</h2>
+            <span id="adminQuickButtonCount">0 saved</span>
+          </div>
+          <div class="quick-button-grid" id="adminQuickButtonGrid"></div>
+          <form id="quickButtonForm">
+            <label>
+              <span>Search Product</span>
+              <input id="quickButtonSearchInput" type="search" autocomplete="off" placeholder="Search item without barcode" />
+            </label>
+            <div class="quick-search-results" id="quickButtonSearchResults"></div>
+          </form>
         </section>
       </section>
 

@@ -57,6 +57,7 @@ const elements = {
   openStoreCountButton: $("#openStoreCountButton"),
   openPosButton: $("#openPosButton"),
   openSyncButton: $("#openSyncButton"),
+  openAdminButton: $("#openAdminButton"),
   storeCountChrome: document.querySelectorAll(".storecount-chrome"),
   tabs: document.querySelectorAll(".tab"),
   panels: {
@@ -65,6 +66,7 @@ const elements = {
     report: $("#reportPanel"),
     pos: $("#posPanel"),
     sync: $("#syncPanel"),
+    admin: $("#adminPanel"),
   },
   totalSku: $("#totalSku"),
   countedSku: $("#countedSku"),
@@ -160,7 +162,8 @@ const elements = {
   posBarcodeInput: $("#posBarcodeInput"),
   quickButtonCount: $("#quickButtonCount"),
   quickButtonGrid: $("#quickButtonGrid"),
-  quickButtonManager: $("#quickButtonManager"),
+  adminQuickButtonCount: $("#adminQuickButtonCount"),
+  adminQuickButtonGrid: $("#adminQuickButtonGrid"),
   quickButtonSearchInput: $("#quickButtonSearchInput"),
   quickButtonSearchResults: $("#quickButtonSearchResults"),
   posCompleteSaleButton: $("#posCompleteSaleButton"),
@@ -199,6 +202,7 @@ function bindEvents() {
   elements.openStoreCountButton.addEventListener("click", () => showStoreCount());
   elements.openPosButton.addEventListener("click", () => showPos());
   elements.openSyncButton.addEventListener("click", () => showSync());
+  elements.openAdminButton.addEventListener("click", () => showAdminSetup());
 
   elements.tabs.forEach((tab) => {
     tab.addEventListener("click", () => setTab(tab.dataset.tab));
@@ -295,12 +299,6 @@ function bindEvents() {
     elements.posBarcodeInput.value = "";
   });
   elements.quickButtonSearchInput.addEventListener("input", renderQuickButtonSearchResults);
-  elements.quickButtonManager.addEventListener("toggle", () => {
-    renderQuickButtons();
-    if (elements.quickButtonManager.open && !elements.quickButtonSearchInput.value.trim()) {
-      renderQuickButtonManagerList();
-    }
-  });
   elements.posCompleteSaleButton.addEventListener("click", handlePosTransactionButton);
   elements.posCheckVoidStatusButton.addEventListener("click", checkVoidRequestStatuses);
   elements.posClearCartButton.addEventListener("click", clearPosCart);
@@ -371,6 +369,7 @@ function renderAppShell() {
   if (!loggedIn) return;
   if (activeModule === "pos") showPos();
   else if (activeModule === "sync") showSync();
+  else if (activeModule === "admin") showAdminSetup();
   else if (activeModule === "storecount") showStoreCount();
   else showModuleHome();
 }
@@ -382,6 +381,7 @@ function showModuleHome() {
   elements.authScreen.hidden = true;
   elements.appShell.hidden = false;
   elements.homePanel.classList.add("is-active");
+  elements.openAdminButton.hidden = !isAdminUser();
   Object.values(elements.panels).forEach((panel) => panel.classList.remove("is-active"));
   elements.storeCountChrome.forEach((item) => (item.hidden = true));
   updateScreenTitle("Home");
@@ -418,6 +418,27 @@ function showSync() {
   updateScreenTitle("Cloud Sync");
   renderSync();
   loadVoidApprovals();
+}
+
+function showAdminSetup() {
+  if (!isAdminUser()) {
+    alert("Only Administrator can open Admin Setup.");
+    showModuleHome();
+    return;
+  }
+
+  activeModule = "admin";
+  stopScanner();
+  stopPosScanner();
+  elements.homePanel.classList.remove("is-active");
+  elements.storeCountChrome.forEach((item) => (item.hidden = true));
+  Object.entries(elements.panels).forEach(([key, panel]) => {
+    panel.classList.toggle("is-active", key === "admin");
+  });
+  updateScreenTitle("Admin Setup");
+  renderQuickButtons();
+  renderAdminQuickButtons();
+  renderQuickButtonSearchResults();
 }
 
 function updateScreenTitle(title) {
@@ -1122,10 +1143,6 @@ function handlePosBarcode(rawCode, source = "manual") {
 
 function renderQuickButtons() {
   elements.quickButtonCount.textContent = `${posQuickButtons.length.toLocaleString()} saved`;
-  elements.quickButtonManager.hidden = !isAdminUser();
-  if (!isAdminUser() && elements.quickButtonManager.open) {
-    elements.quickButtonManager.open = false;
-  }
   elements.quickButtonGrid.innerHTML = "";
 
   if (!posQuickButtons.length) {
@@ -1139,14 +1156,12 @@ function renderQuickButtons() {
     const savedPrice = sanitizeMoney(button.price);
     const productPrice = sanitizeMoney(item?.price);
     const tile = document.createElement("div");
-    tile.className = `quick-sale-button${isAdminUser() && elements.quickButtonManager.open ? " is-managing" : ""}`;
-    tile.type = "button";
+    tile.className = "quick-sale-button";
     tile.innerHTML = `
       <button type="button" data-quick-sale="${escapeHtml(button.code)}">
         <strong>${escapeHtml(button.label || item?.description || button.code)}</strong>
         <span>${escapeHtml(button.code)} | ${formatMoney(savedPrice || productPrice)}</span>
       </button>
-      <button class="quick-remove-button" type="button" data-quick-remove="${escapeHtml(button.code)}">Remove</button>
     `;
     fragment.appendChild(tile);
   });
@@ -1154,10 +1169,6 @@ function renderQuickButtons() {
   elements.quickButtonGrid.querySelectorAll("[data-quick-sale]").forEach((button) => {
     button.addEventListener("click", () => handleQuickButtonSale(button.dataset.quickSale));
   });
-  elements.quickButtonGrid.querySelectorAll("[data-quick-remove]").forEach((button) => {
-    button.addEventListener("click", () => removeQuickButton(button.dataset.quickRemove));
-  });
-  if (isAdminUser() && !elements.quickButtonSearchInput.value.trim()) renderQuickButtonManagerList();
 }
 
 function renderQuickButtonSearchResults() {
@@ -1166,7 +1177,7 @@ function renderQuickButtonSearchResults() {
   elements.quickButtonSearchResults.innerHTML = "";
 
   if (!query) {
-    renderQuickButtonManagerList();
+    elements.quickButtonSearchResults.innerHTML = `<div class="empty-state"><strong>Search item</strong><p>Type SKU or description to add a quick button.</p></div>`;
     return;
   }
 
@@ -1203,12 +1214,13 @@ function renderQuickButtonSearchResults() {
   elements.quickButtonSearchResults.appendChild(fragment);
 }
 
-function renderQuickButtonManagerList() {
+function renderAdminQuickButtons() {
   if (!isAdminUser()) return;
-  elements.quickButtonSearchResults.innerHTML = "";
+  elements.adminQuickButtonCount.textContent = `${posQuickButtons.length.toLocaleString()} saved`;
+  elements.adminQuickButtonGrid.innerHTML = "";
 
   if (!posQuickButtons.length) {
-    elements.quickButtonSearchResults.innerHTML = `<div class="empty-state"><strong>Search item</strong><p>Type SKU or description to add a quick button.</p></div>`;
+    elements.adminQuickButtonGrid.innerHTML = `<div class="empty-state"><strong>No quick buttons</strong><p>Search below to add no-barcode items.</p></div>`;
     return;
   }
 
@@ -1226,7 +1238,7 @@ function renderQuickButtonManagerList() {
     row.querySelector("button").addEventListener("click", () => removeQuickButton(button.code));
     fragment.appendChild(row);
   });
-  elements.quickButtonSearchResults.appendChild(fragment);
+  elements.adminQuickButtonGrid.appendChild(fragment);
 }
 
 function addQuickButton(code) {
@@ -1258,6 +1270,7 @@ function addQuickButton(code) {
   savePosQuickButtons();
   elements.quickButtonSearchInput.value = "";
   renderQuickButtons();
+  renderAdminQuickButtons();
   renderQuickButtonSearchResults();
 }
 
@@ -1272,6 +1285,7 @@ function removeQuickButton(code) {
   posQuickButtons = posQuickButtons.filter((item) => item.code !== code);
   savePosQuickButtons();
   renderQuickButtons();
+  renderAdminQuickButtons();
   renderQuickButtonSearchResults();
 }
 
