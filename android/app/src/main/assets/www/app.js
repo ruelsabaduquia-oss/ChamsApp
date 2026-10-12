@@ -1116,17 +1116,20 @@ function renderQuickButtons() {
   const fragment = document.createDocumentFragment();
   posQuickButtons.forEach((button) => {
     const item = inventory.find((sku) => sku.code === button.code);
+    const savedPrice = sanitizeMoney(button.price);
+    const productPrice = sanitizeMoney(item?.price);
     const tile = document.createElement("button");
     tile.className = "quick-sale-button";
     tile.type = "button";
     tile.innerHTML = `
       <strong>${escapeHtml(button.label || item?.description || button.code)}</strong>
-      <span>${escapeHtml(button.code)} | ${formatMoney(item?.price ?? button.price ?? 0)}</span>
+      <span>${escapeHtml(button.code)} | ${formatMoney(savedPrice || productPrice)}</span>
     `;
     tile.addEventListener("click", () => handleQuickButtonSale(button.code));
     fragment.appendChild(tile);
   });
   elements.quickButtonGrid.appendChild(fragment);
+  if (!elements.quickButtonSearchInput.value.trim()) renderQuickButtonManagerList();
 }
 
 function renderQuickButtonSearchResults() {
@@ -1134,7 +1137,7 @@ function renderQuickButtonSearchResults() {
   elements.quickButtonSearchResults.innerHTML = "";
 
   if (!query) {
-    elements.quickButtonSearchResults.innerHTML = `<div class="empty-state"><strong>Search item</strong><p>Type SKU or description to add a quick button.</p></div>`;
+    renderQuickButtonManagerList();
     return;
   }
 
@@ -1171,18 +1174,65 @@ function renderQuickButtonSearchResults() {
   elements.quickButtonSearchResults.appendChild(fragment);
 }
 
+function renderQuickButtonManagerList() {
+  elements.quickButtonSearchResults.innerHTML = "";
+
+  if (!posQuickButtons.length) {
+    elements.quickButtonSearchResults.innerHTML = `<div class="empty-state"><strong>Search item</strong><p>Type SKU or description to add a quick button.</p></div>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  posQuickButtons.forEach((button) => {
+    const row = document.createElement("div");
+    row.className = "quick-search-row";
+    row.innerHTML = `
+      <div>
+        <strong>${escapeHtml(button.label || button.code)}</strong>
+        <small>${escapeHtml(button.code)} | ${formatMoney(button.price || 0)}</small>
+      </div>
+      <button class="secondary-button danger" type="button">Remove</button>
+    `;
+    row.querySelector("button").addEventListener("click", () => removeQuickButton(button.code));
+    fragment.appendChild(row);
+  });
+  elements.quickButtonSearchResults.appendChild(fragment);
+}
+
 function addQuickButton(code) {
   const item = inventory.find((sku) => sku.code === code);
   if (!item) return;
+  let price = sanitizeMoney(item.price);
+  if (price <= 0) {
+    const entered = prompt(`Enter selling price for quick button\n${item.description}`, "0.00");
+    if (entered === null) return;
+    price = sanitizeMoney(entered);
+    if (price <= 0) {
+      alert("Price must be greater than zero.");
+      return;
+    }
+    item.price = price;
+    saveInventory();
+  }
 
   posQuickButtons.push({
     code: item.code,
     label: item.description,
-    price: sanitizeMoney(item.price),
+    price,
     createdAt: new Date().toISOString(),
   });
   savePosQuickButtons();
   elements.quickButtonSearchInput.value = "";
+  renderQuickButtons();
+  renderQuickButtonSearchResults();
+}
+
+function removeQuickButton(code) {
+  const button = posQuickButtons.find((item) => item.code === code);
+  if (!button) return;
+  if (!confirm(`Remove quick button?\n${button.label || button.code}`)) return;
+  posQuickButtons = posQuickButtons.filter((item) => item.code !== code);
+  savePosQuickButtons();
   renderQuickButtons();
   renderQuickButtonSearchResults();
 }
@@ -1200,17 +1250,18 @@ function handleQuickButtonSale(code) {
     return;
   }
 
-  addPosItemByCode(code, "quick");
+  const quickButton = posQuickButtons.find((button) => button.code === code);
+  addPosItemByCode(code, "quick", quickButton?.price || 0);
 }
 
-function addPosItemByCode(code, source = "quick") {
+function addPosItemByCode(code, source = "quick", savedPrice = 0) {
   const item = inventory.find((sku) => sku.code === code);
   if (!item) {
     alert("Quick button item was not found in product list.");
     return;
   }
 
-  const price = ensurePosPrice(item);
+  const price = sanitizeMoney(savedPrice) || ensurePosPrice(item);
   if (price === null) {
     elements.posScanStatus.textContent = "PRICE REQUIRED";
     return;

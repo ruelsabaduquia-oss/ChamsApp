@@ -1785,7 +1785,7 @@ button:disabled {
 
 .quick-search-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px;
+  grid-template-columns: minmax(0, 1fr) 92px;
   gap: 8px;
   align-items: center;
   padding: 10px;
