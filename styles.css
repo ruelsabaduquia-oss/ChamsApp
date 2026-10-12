@@ -1745,12 +1745,23 @@ button:disabled {
 .quick-sale-button {
   display: grid;
   gap: 4px;
-  min-height: 72px;
-  padding: 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #eff6ff;
   color: var(--ink);
+  text-align: left;
+  overflow: hidden;
+}
+
+.quick-sale-button > button:first-child {
+  display: grid;
+  gap: 4px;
+  min-height: 72px;
+  width: 100%;
+  border: 0;
+  padding: 10px;
+  background: transparent;
+  color: inherit;
   text-align: left;
 }
 
@@ -1763,6 +1774,21 @@ button:disabled {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 800;
+}
+
+.quick-remove-button {
+  display: none;
+  min-height: 34px;
+  border: 0;
+  border-top: 1px solid #fecaca;
+  background: #fef2f2;
+  color: var(--danger);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.quick-sale-button.is-managing .quick-remove-button {
+  display: block;
 }
 
 .quick-button-manager {

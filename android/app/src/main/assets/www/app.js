@@ -160,6 +160,7 @@ const elements = {
   posBarcodeInput: $("#posBarcodeInput"),
   quickButtonCount: $("#quickButtonCount"),
   quickButtonGrid: $("#quickButtonGrid"),
+  quickButtonManager: $("#quickButtonManager"),
   quickButtonSearchInput: $("#quickButtonSearchInput"),
   quickButtonSearchResults: $("#quickButtonSearchResults"),
   posCompleteSaleButton: $("#posCompleteSaleButton"),
@@ -294,6 +295,12 @@ function bindEvents() {
     elements.posBarcodeInput.value = "";
   });
   elements.quickButtonSearchInput.addEventListener("input", renderQuickButtonSearchResults);
+  elements.quickButtonManager.addEventListener("toggle", () => {
+    renderQuickButtons();
+    if (elements.quickButtonManager.open && !elements.quickButtonSearchInput.value.trim()) {
+      renderQuickButtonManagerList();
+    }
+  });
   elements.posCompleteSaleButton.addEventListener("click", handlePosTransactionButton);
   elements.posCheckVoidStatusButton.addEventListener("click", checkVoidRequestStatuses);
   elements.posClearCartButton.addEventListener("click", clearPosCart);
@@ -1123,17 +1130,25 @@ function renderQuickButtons() {
     const item = inventory.find((sku) => sku.code === button.code);
     const savedPrice = sanitizeMoney(button.price);
     const productPrice = sanitizeMoney(item?.price);
-    const tile = document.createElement("button");
-    tile.className = "quick-sale-button";
+    const tile = document.createElement("div");
+    tile.className = `quick-sale-button${elements.quickButtonManager.open ? " is-managing" : ""}`;
     tile.type = "button";
     tile.innerHTML = `
-      <strong>${escapeHtml(button.label || item?.description || button.code)}</strong>
-      <span>${escapeHtml(button.code)} | ${formatMoney(savedPrice || productPrice)}</span>
+      <button type="button" data-quick-sale="${escapeHtml(button.code)}">
+        <strong>${escapeHtml(button.label || item?.description || button.code)}</strong>
+        <span>${escapeHtml(button.code)} | ${formatMoney(savedPrice || productPrice)}</span>
+      </button>
+      <button class="quick-remove-button" type="button" data-quick-remove="${escapeHtml(button.code)}">Remove</button>
     `;
-    tile.addEventListener("click", () => handleQuickButtonSale(button.code));
     fragment.appendChild(tile);
   });
   elements.quickButtonGrid.appendChild(fragment);
+  elements.quickButtonGrid.querySelectorAll("[data-quick-sale]").forEach((button) => {
+    button.addEventListener("click", () => handleQuickButtonSale(button.dataset.quickSale));
+  });
+  elements.quickButtonGrid.querySelectorAll("[data-quick-remove]").forEach((button) => {
+    button.addEventListener("click", () => removeQuickButton(button.dataset.quickRemove));
+  });
   if (!elements.quickButtonSearchInput.value.trim()) renderQuickButtonManagerList();
 }
 
