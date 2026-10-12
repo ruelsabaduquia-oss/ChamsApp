@@ -157,6 +157,7 @@ const elements = {
   posManualBarcodeForm: $("#posManualBarcodeForm"),
   posBarcodeInput: $("#posBarcodeInput"),
   posCompleteSaleButton: $("#posCompleteSaleButton"),
+  posCheckVoidStatusButton: $("#posCheckVoidStatusButton"),
   posClearCartButton: $("#posClearCartButton"),
   posXReadingButton: $("#posXReadingButton"),
   posYReadingButton: $("#posYReadingButton"),
@@ -170,6 +171,9 @@ const elements = {
   syncAllButton: $("#syncAllButton"),
   downloadProductsButton: $("#downloadProductsButton"),
   uploadSalesButton: $("#uploadSalesButton"),
+  voidApprovalCount: $("#voidApprovalCount"),
+  voidApprovalList: $("#voidApprovalList"),
+  refreshVoidApprovalsButton: $("#refreshVoidApprovalsButton"),
 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -284,12 +288,14 @@ function bindEvents() {
     elements.posBarcodeInput.value = "";
   });
   elements.posCompleteSaleButton.addEventListener("click", handlePosTransactionButton);
+  elements.posCheckVoidStatusButton.addEventListener("click", checkVoidRequestStatuses);
   elements.posClearCartButton.addEventListener("click", clearPosCart);
   elements.posXReadingButton.addEventListener("click", () => renderPosReading("X"));
   elements.posYReadingButton.addEventListener("click", closePosShift);
   elements.syncAllButton.addEventListener("click", syncAll);
   elements.downloadProductsButton.addEventListener("click", downloadProductsFromCloud);
   elements.uploadSalesButton.addEventListener("click", uploadSalesToCloud);
+  elements.refreshVoidApprovalsButton.addEventListener("click", loadVoidApprovals);
 
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -397,6 +403,7 @@ function showSync() {
   });
   updateScreenTitle("Cloud Sync");
   renderSync();
+  loadVoidApprovals();
 }
 
 function updateScreenTitle(title) {
@@ -497,6 +504,10 @@ function render() {
   renderSelectedSku();
   renderPos();
   renderSync();
+}
+
+function canApproveVoid(role) {
+  return ["admin", "manager", "branch_head"].includes(String(role || "").toLowerCase());
 }
 
 function renderCatalogPreview() {
@@ -850,6 +861,11 @@ async function handlePosCrewLogin(event) {
   posSession.crew = verifiedUser.displayName || verifiedUser.username;
   posSession.crewUsername = verifiedUser.username;
   posSession.crewRole = verifiedUser.role;
+  if (!branchName && verifiedUser.branchName) {
+    branchName = verifiedUser.branchName;
+    elements.branchInput.value = branchName;
+    saveBranchName();
+  }
   posSession.startedAt = new Date().toISOString();
   posSession.float = 0;
   posSession.active = false;
@@ -905,6 +921,7 @@ function renderPos() {
   elements.posCrewLabel.textContent = hasCrew ? `Crew: ${posSession.crew}` : "Crew not signed in";
   elements.posStatusBadge.textContent = hasActiveRegister ? "Open" : "Closed";
   elements.posCompleteSaleButton.textContent = posSession.transactionActive ? "Cash Out" : "Start Transaction";
+  elements.posCheckVoidStatusButton.hidden = !posSession.transactionActive || !(posSession.voidRequests || []).some((request) => request.status === "pending");
   elements.posScanButton.hidden = !posSession.transactionActive || posScanner.active;
   elements.posStopScanButton.hidden = !posScanner.active;
   showPosRecoveryNotice();
@@ -945,20 +962,21 @@ function renderPosCart() {
 
   const fragment = document.createDocumentFragment();
   posSession.cart.forEach((line) => {
+    const pendingVoid = (posSession.voidRequests || []).find((request) => request.code === line.code && request.status === "pending");
     const row = document.createElement("div");
     row.className = "pos-cart-row";
     row.innerHTML = `
       <div>
         <strong>${escapeHtml(line.code)}</strong>
         <span>${escapeHtml(line.description)}</span>
-        <small>${formatMoney(line.price)} each</small>
+        <small>${formatMoney(line.price)} each${pendingVoid ? " | Void approval pending" : ""}</small>
       </div>
       <label>
         <span>Qty</span>
         <input type="number" min="1" step="1" inputmode="numeric" value="${Number(line.qty || 1)}" data-pos-qty="${escapeHtml(line.code)}" />
       </label>
       <p>${formatMoney(Number(line.qty || 0) * Number(line.price || 0))}</p>
-      <button class="secondary-button danger" type="button" data-pos-void="${escapeHtml(line.code)}">Void</button>
+      <button class="secondary-button danger" type="button" data-pos-void="${escapeHtml(line.code)}" ${pendingVoid ? "disabled" : ""}>${pendingVoid ? "Pending" : "Void"}</button>
     `;
     fragment.appendChild(row);
   });
@@ -1126,8 +1144,111 @@ function updatePosLineQty(code, value) {
   renderPosCart();
 }
 
-function voidPosLine(code) {
-  if (!confirm("Void this item from the current transaction?")) return;
+async function createVoidApprovalRequest(line, reason) {
+  const deviceRequestId = createDeviceId("void");
+  const payload = {
+    device_request_id: deviceRequestId,
+    transaction_id: posSession.currentTransactionId || createDeviceId("txn"),
+    branch_name: branchName || appUser?.branchName || "",
+    crew_username: posSession.crewUsername || posSession.crew || "",
+    crew_name: posSession.crew || "",
+    item_code: line.code,
+    barcode: line.barcode || null,
+    description: line.description,
+    qty: Number(line.qty || 0),
+    price: sanitizeMoney(line.price),
+    line_total: sanitizeMoney(Number(line.qty || 0) * Number(line.price || 0)),
+    reason,
+    status: "pending",
+    raw_payload: {
+      line,
+      requestedBy: posSession.crewUsername || posSession.crew || "",
+      requestedFrom: appUser?.username || "",
+    },
+  };
+
+  const rows = await supabaseRequest("/rest/v1/void_approval_requests", {
+    method: "POST",
+    headers: {
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return rows[0];
+}
+
+async function logApprovedVoid(line, reason) {
+  try {
+    const deviceRequestId = createDeviceId("void");
+    await supabaseRequest("/rest/v1/void_approval_requests", {
+      method: "POST",
+      headers: {
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        device_request_id: deviceRequestId,
+        transaction_id: posSession.currentTransactionId || createDeviceId("txn"),
+        branch_name: branchName || appUser?.branchName || "",
+        crew_username: posSession.crewUsername || posSession.crew || "",
+        crew_name: posSession.crew || "",
+        item_code: line.code,
+        barcode: line.barcode || null,
+        description: line.description,
+        qty: Number(line.qty || 0),
+        price: sanitizeMoney(line.price),
+        line_total: sanitizeMoney(Number(line.qty || 0) * Number(line.price || 0)),
+        reason,
+        status: "approved",
+        decided_at: new Date().toISOString(),
+        decided_by: posSession.crewUsername || posSession.crew || "",
+        decision_note: "Direct authorized void",
+        applied_at: new Date().toISOString(),
+        raw_payload: { line },
+      }),
+    });
+  } catch {
+    // A local authorized void should not fail just because audit logging is temporarily offline.
+  }
+}
+
+async function voidPosLine(code) {
+  const line = posSession.cart.find((item) => item.code === code);
+  if (!line) return;
+
+  if (canApproveVoid(posSession.crewRole)) {
+    if (!confirm("Void this item from the current transaction?")) return;
+    await logApprovedVoid(line, "Direct void by authorized POS user.");
+    removePosLine(code);
+    return;
+  }
+
+  const reason = prompt(`Reason for void request\n${line.description}`, "");
+  if (reason === null) return;
+  const cleanReason = reason.trim();
+  if (!cleanReason) {
+    alert("Void reason is required.");
+    return;
+  }
+
+  try {
+    const request = await createVoidApprovalRequest(line, cleanReason);
+    posSession.voidRequests.unshift({
+      requestId: request.id,
+      deviceRequestId: request.device_request_id,
+      code: line.code,
+      status: "pending",
+      requestedAt: request.requested_at,
+    });
+    savePosSession();
+    renderPosCart();
+    alert("Void request sent. Supervisor must approve before this item is removed.");
+  } catch (error) {
+    alert(`Void request could not be sent.\n${error.message}`);
+  }
+}
+
+function removePosLine(code) {
   posSession.cart = posSession.cart.filter((item) => item.code !== code);
   savePosSession();
   renderPosCart();
@@ -1135,6 +1256,10 @@ function voidPosLine(code) {
 
 function clearPosCart() {
   if (!posSession.transactionActive && !posSession.cart.length) return;
+  if (!canApproveVoid(posSession.crewRole)) {
+    alert("Only Manager, Branch Head, or Administrator can void the entire transaction.");
+    return;
+  }
   if (!confirm("Void entire current transaction?")) return;
   posSession.cart = [];
   posSession.transactionActive = false;
@@ -1165,6 +1290,8 @@ function startPosTransaction() {
 
   posSession.cart = [];
   posSession.transactionActive = true;
+  posSession.currentTransactionId = createDeviceId("txn");
+  posSession.voidRequests = [];
   savePosSession();
   renderPos();
   startPosScanner();
@@ -1181,13 +1308,19 @@ function completePosSale() {
     return;
   }
 
+  if ((posSession.voidRequests || []).some((request) => request.status === "pending")) {
+    alert("There is a pending void approval. Check Void Status before Cash Out.");
+    return;
+  }
+
   const total = getPosCartTotal();
   const payment = collectPosPayment(total);
   if (!payment) return;
 
   const sale = {
-    id: `${new Date().toISOString()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: posSession.currentTransactionId || createDeviceId("sale"),
     crew: posSession.crew,
+    crewUsername: posSession.crewUsername || posSession.crew,
     createdAt: new Date().toISOString(),
     total,
     payment,
@@ -1196,6 +1329,8 @@ function completePosSale() {
   posSession.sales.unshift(sale);
   posSession.cart = [];
   posSession.transactionActive = false;
+  posSession.currentTransactionId = "";
+  posSession.voidRequests = [];
   savePosSession();
   stopPosScanner();
   renderPos();
@@ -1294,6 +1429,158 @@ function renderSync() {
     syncState.lastMessage || "Download product updates before selling, then upload completed POS sales when internet is available.";
 }
 
+async function loadVoidApprovals() {
+  if (!elements.voidApprovalList) return;
+
+  if (!canApproveVoid(appUser?.role)) {
+    elements.voidApprovalCount.textContent = "restricted";
+    elements.voidApprovalList.innerHTML =
+      `<div class="empty-state"><strong>Supervisor access only</strong><p>Manager, Branch Head, or Administrator can approve void requests.</p></div>`;
+    return;
+  }
+
+  elements.voidApprovalCount.textContent = "checking";
+  elements.voidApprovalList.innerHTML = `<div class="empty-state"><strong>Loading requests</strong><p>Please wait.</p></div>`;
+
+  try {
+    const branchFilter = appUser?.role === "branch_head" && appUser.branchName
+      ? `&branch_name=eq.${encodeURIComponent(appUser.branchName)}`
+      : "";
+    const requests = await supabaseRequest(
+      `/rest/v1/void_approval_requests?select=*&status=eq.pending${branchFilter}&order=requested_at.asc&limit=50`
+    );
+    renderVoidApprovals(requests);
+  } catch (error) {
+    elements.voidApprovalCount.textContent = "error";
+    elements.voidApprovalList.innerHTML =
+      `<div class="empty-state"><strong>Cannot load requests</strong><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function renderVoidApprovals(requests) {
+  elements.voidApprovalCount.textContent = `${requests.length.toLocaleString()} pending`;
+  elements.voidApprovalList.innerHTML = "";
+
+  if (!requests.length) {
+    elements.voidApprovalList.innerHTML =
+      `<div class="empty-state"><strong>No pending request</strong><p>Void requests from crew will appear here.</p></div>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  requests.forEach((request) => {
+    const card = document.createElement("article");
+    card.className = "approval-card";
+    card.innerHTML = `
+      <div>
+        <strong>${escapeHtml(request.description)}</strong>
+        <span>${escapeHtml(request.item_code)} | Qty ${Number(request.qty || 0).toLocaleString()} | ${formatMoney(request.line_total || 0)}</span>
+        <small>Branch: ${escapeHtml(request.branch_name || "Not set")}</small>
+        <small>Crew: ${escapeHtml(request.crew_name || request.crew_username || "Unknown")}</small>
+        <small>Reason: ${escapeHtml(request.reason || "No reason")}</small>
+        <small>Requested: ${escapeHtml(formatAuditDate(request.requested_at))}</small>
+      </div>
+      <div class="approval-actions">
+        <button class="secondary-button" type="button" data-approve-void="${escapeHtml(request.id)}">Approve</button>
+        <button class="secondary-button danger" type="button" data-reject-void="${escapeHtml(request.id)}">Reject</button>
+      </div>
+    `;
+    fragment.appendChild(card);
+  });
+
+  elements.voidApprovalList.appendChild(fragment);
+  elements.voidApprovalList.querySelectorAll("[data-approve-void]").forEach((button) => {
+    button.addEventListener("click", () => decideVoidRequest(button.dataset.approveVoid, "approved"));
+  });
+  elements.voidApprovalList.querySelectorAll("[data-reject-void]").forEach((button) => {
+    button.addEventListener("click", () => decideVoidRequest(button.dataset.rejectVoid, "rejected"));
+  });
+}
+
+async function decideVoidRequest(id, status) {
+  if (!canApproveVoid(appUser?.role)) {
+    alert("Only Manager, Branch Head, or Administrator can approve void requests.");
+    return;
+  }
+
+  const action = status === "approved" ? "approve" : "reject";
+  const note = prompt(`Optional note for ${action} decision`, "");
+  if (note === null) return;
+
+  try {
+    await supabaseRequest(`/rest/v1/void_approval_requests?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        status,
+        decided_at: new Date().toISOString(),
+        decided_by: appUser?.username || "supervisor",
+        decision_note: note.trim(),
+      }),
+    });
+    await loadVoidApprovals();
+  } catch (error) {
+    alert(`Could not ${action} request.\n${error.message}`);
+  }
+}
+
+async function checkVoidRequestStatuses() {
+  const pending = (posSession.voidRequests || []).filter((request) => request.status === "pending");
+  if (!pending.length) {
+    alert("No pending void approval request.");
+    return;
+  }
+
+  try {
+    const ids = pending.map((request) => request.requestId).filter(Boolean);
+    const rows = await supabaseRequest(
+      `/rest/v1/void_approval_requests?select=id,item_code,status,decision_note&id=in.(${ids.map(encodeURIComponent).join(",")})`
+    );
+    let approved = 0;
+    let rejected = 0;
+
+    rows.forEach((row) => {
+      const localRequest = posSession.voidRequests.find((request) => request.requestId === row.id);
+      if (!localRequest) return;
+
+      if (row.status === "approved") {
+        removePosLine(row.item_code);
+        localRequest.status = "applied";
+        approved += 1;
+        markVoidApplied(row.id);
+      } else if (row.status === "rejected") {
+        localRequest.status = "rejected";
+        rejected += 1;
+      }
+    });
+
+    savePosSession();
+    renderPosCart();
+    alert(`Void status checked.\nApproved and removed: ${approved}\nRejected: ${rejected}\nStill pending: ${Math.max(pending.length - approved - rejected, 0)}`);
+  } catch (error) {
+    alert(`Could not check void status.\n${error.message}`);
+  }
+}
+
+async function markVoidApplied(id) {
+  try {
+    await supabaseRequest(`/rest/v1/void_approval_requests?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        status: "applied",
+        applied_at: new Date().toISOString(),
+      }),
+    });
+  } catch {
+    // The item was already approved and removed locally; applying the audit flag can retry later.
+  }
+}
+
 async function syncAll() {
   setSyncBusy(true, "Syncing...");
   try {
@@ -1385,7 +1672,7 @@ async function uploadOneSale(sale) {
   const transactionPayload = {
     device_sale_id: sale.id,
     branch_name: branchName || "Not set",
-    crew_username: sale.crew || "Unknown",
+    crew_username: sale.crewUsername || sale.crew || "Unknown",
     shift_started_at: posSession.startedAt || null,
     sold_at: sale.createdAt || new Date().toISOString(),
     payment_method: sale.payment?.method || "cash",
@@ -1483,6 +1770,7 @@ async function verifyCloudUser(username, password, requiredArea) {
       username: user.username,
       displayName: user.display_name || user.username,
       role: user.role || "crew",
+      branchName: user.branch_name || "",
     };
   } catch (error) {
     if (isUserSetupMissing(error)) {
@@ -1491,6 +1779,7 @@ async function verifyCloudUser(username, password, requiredArea) {
         username,
         displayName: username,
         role: requiredArea === "pos" ? "crew" : "admin",
+        branchName: "",
       };
     }
 
@@ -2181,6 +2470,10 @@ function normalizeBarcode(value) {
     .toUpperCase();
 }
 
+function createDeviceId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function csvCell(value) {
   const text = String(value ?? "");
   if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
@@ -2281,9 +2574,11 @@ function createEmptyPosSession() {
     transactionActive: false,
     crewUsername: "",
     crewRole: "",
+    currentTransactionId: "",
     startedAt: "",
     cart: [],
     sales: [],
+    voidRequests: [],
   };
 }
 

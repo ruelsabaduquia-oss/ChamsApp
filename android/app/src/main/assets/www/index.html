@@ -522,6 +522,7 @@
 
           <div class="report-actions">
             <button class="primary-button" id="posCompleteSaleButton" type="button">Cash Out</button>
+            <button class="secondary-button" id="posCheckVoidStatusButton" type="button">Check Void Status</button>
             <button class="secondary-button danger" id="posClearCartButton" type="button">Void Transaction</button>
           </div>
 
@@ -569,6 +570,17 @@
             <button class="secondary-button" id="uploadSalesButton" type="button">Upload Sales</button>
           </div>
           <div class="saved-audit-details" id="syncDetails">Ready to connect to Supabase.</div>
+        </section>
+
+        <section class="setup-card">
+          <div class="section-heading">
+            <h2>Void Approvals</h2>
+            <span id="voidApprovalCount">0 pending</span>
+          </div>
+          <button class="secondary-button" id="refreshVoidApprovalsButton" type="button">Refresh Requests</button>
+          <div class="approval-list" id="voidApprovalList">
+            <div class="empty-state"><strong>No pending request</strong><p>Void requests from crew will appear here.</p></div>
+          </div>
         </section>
       </section>
 

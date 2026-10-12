@@ -48,6 +48,18 @@ Starter test users:
 
 Change these passwords before real store use.
 
+## Create Void Approval Requests
+
+After `supabase/user_auth.sql` is complete:
+
+1. Go to **SQL Editor** again.
+2. Open `supabase/void_approvals.sql` from this project.
+3. Copy the full SQL script.
+4. Paste it into Supabase SQL Editor.
+5. Click **Run**.
+
+This creates the table used when crew requests a supervisor-approved void.
+
 ## Important Key Safety
 
 The app can use the Supabase **anon public** key.

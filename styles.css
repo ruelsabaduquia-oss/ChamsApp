@@ -1630,6 +1630,38 @@ button:disabled {
   margin: 12px 0;
 }
 
+.approval-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.approval-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+
+.approval-card strong,
+.approval-card span,
+.approval-card small {
+  display: block;
+}
+
+.approval-card small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.approval-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .compact-stage {
   min-height: 140px;
 }
