@@ -9,16 +9,38 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="app-shell">
+    <section class="auth-screen" id="authScreen">
+      <div class="auth-card">
+        <div class="app-mark large-mark" aria-hidden="true">SC</div>
+        <p class="eyebrow">Chams Store Operations</p>
+        <h1>Sign in</h1>
+        <form id="appLoginForm">
+          <label>
+            <span>Username</span>
+            <input id="appUsernameInput" type="text" autocomplete="username" placeholder="Enter username" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="appPasswordInput" type="password" autocomplete="current-password" placeholder="Enter password" required />
+          </label>
+          <button class="primary-button" type="submit">Login</button>
+        </form>
+      </div>
+    </section>
+
+    <main class="app-shell" id="appShell" hidden>
       <header class="top-bar">
         <div class="brand-block">
           <div class="app-mark" aria-hidden="true">SC</div>
           <div>
             <p class="eyebrow">StockCount Pro <span>#412</span></p>
-            <h1>Stock List</h1>
+            <h1 id="screenTitle">Home</h1>
           </div>
         </div>
         <div class="header-actions">
+          <button class="icon-button" id="homeButton" type="button" title="Home">
+            <span aria-hidden="true">⌂</span>
+          </button>
           <span class="live-pill">Live</span>
           <button class="icon-button" id="installButton" type="button" title="Install app" hidden>
             <span aria-hidden="true">+</span>
@@ -26,7 +48,25 @@
         </div>
       </header>
 
-      <section class="audit-card" aria-label="Inventory summary">
+      <section class="home-panel is-active" id="homePanel">
+        <div class="home-hero">
+          <span>Signed in</span>
+          <h2>Choose Module</h2>
+          <p>Use Store Count for inventory audits or POS for cashier transactions.</p>
+        </div>
+        <div class="module-grid">
+          <button class="module-card" id="openStoreCountButton" type="button">
+            <strong>Store Count</strong>
+            <span>Inventory count, barcode scan, reports</span>
+          </button>
+          <button class="module-card" id="openPosButton" type="button">
+            <strong>POS</strong>
+            <span>Crew login, float, sales, X/Y reading</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="audit-card storecount-chrome" aria-label="Inventory summary" hidden>
         <div class="audit-card-head">
           <strong>Audit Progress</strong>
           <span id="progressLabel">0% Complete</span>
@@ -48,7 +88,7 @@
         <div class="progress-track"><span id="progressBar"></span></div>
       </section>
 
-      <nav class="tabs" aria-label="Inventory sections">
+      <nav class="tabs storecount-chrome" aria-label="Inventory sections" hidden>
         <button class="tab is-active" type="button" data-tab="upload">Upload</button>
         <button class="tab" type="button" data-tab="count">Count</button>
         <button class="tab" type="button" data-tab="report">Report</button>
@@ -368,7 +408,120 @@
         </div>
       </section>
 
-      <nav class="bottom-nav" aria-label="Primary navigation">
+      <section class="panel" id="posPanel">
+        <div class="pos-hero">
+          <div>
+            <span>Point of Sale</span>
+            <h2>POS Register</h2>
+            <p id="posCrewLabel">Crew not signed in</p>
+          </div>
+          <strong id="posStatusBadge">Closed</strong>
+        </div>
+
+        <section class="setup-card" id="posCrewCard">
+          <div class="section-heading">
+            <h2>Crew Login</h2>
+            <span>Required</span>
+          </div>
+          <form id="posCrewLoginForm">
+            <label>
+              <span>Crew Username</span>
+              <input id="posCrewUsernameInput" type="text" autocomplete="username" placeholder="Enter crew username" />
+            </label>
+            <label>
+              <span>Crew Password</span>
+              <input id="posCrewPasswordInput" type="password" autocomplete="current-password" placeholder="Enter crew password" />
+            </label>
+            <button class="primary-button" type="submit">Open POS</button>
+          </form>
+        </section>
+
+        <section class="setup-card" id="posFloatCard" hidden>
+          <div class="section-heading">
+            <h2>Opening Float</h2>
+            <span>Required</span>
+          </div>
+          <form id="posFloatForm">
+            <label>
+              <span>Float Amount</span>
+              <input id="posFloatInput" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
+            </label>
+            <button class="primary-button" type="submit">Start Transaction</button>
+          </form>
+        </section>
+
+        <section class="pos-register" id="posRegister" hidden>
+          <div class="pos-kpis">
+            <article>
+              <span>Float</span>
+              <strong id="posFloatDisplay">0.00</strong>
+            </article>
+            <article>
+              <span>Cart</span>
+              <strong id="posCartTotal">0.00</strong>
+            </article>
+            <article>
+              <span>Sales</span>
+              <strong id="posSalesTotal">0.00</strong>
+            </article>
+          </div>
+
+          <div class="scan-box">
+            <div class="scanner-stage compact-stage">
+              <video id="posScanVideo" playsinline muted hidden></video>
+              <div class="scanner-placeholder" id="posScannerPlaceholder">
+                <span></span>
+                <strong>POS Scanner</strong>
+              </div>
+              <div class="reticle" aria-hidden="true"><span></span></div>
+            </div>
+            <div class="scan-head">
+              <strong>Item Barcode</strong>
+              <span id="posScanStatus">READY</span>
+            </div>
+            <div class="action-row">
+              <button class="secondary-button" id="posScanButton" type="button">Scan Item</button>
+              <button class="secondary-button" id="posStopScanButton" type="button" hidden>Stop</button>
+            </div>
+            <form class="barcode-fallback" id="posManualBarcodeForm">
+              <div class="manual-barcode-head">
+                <strong>Manual Barcode</strong>
+                <small>Use this when item barcode is defective.</small>
+              </div>
+              <label>
+                <span>Barcode / SKU</span>
+                <input id="posBarcodeInput" type="text" inputmode="text" autocomplete="off" enterkeyhint="done" placeholder="Type barcode or SKU code" />
+              </label>
+              <button class="secondary-button" type="submit">Add Item</button>
+            </form>
+          </div>
+
+          <div class="pos-cart">
+            <div class="section-heading">
+              <h2>Current Transaction</h2>
+              <span id="posCartCount">0 items</span>
+            </div>
+            <div id="posCartRows" class="pos-cart-rows"></div>
+          </div>
+
+          <div class="report-actions">
+            <button class="primary-button" id="posCompleteSaleButton" type="button">Complete Sale</button>
+            <button class="secondary-button danger" id="posClearCartButton" type="button">Void Transaction</button>
+          </div>
+
+          <section class="saved-audits">
+            <div class="section-heading">
+              <h2>X / Y Reading</h2>
+              <span id="posReadingLabel">Ready</span>
+            </div>
+            <div class="saved-audit-details" id="posReadingDetails">No reading generated yet.</div>
+            <button class="secondary-button" id="posXReadingButton" type="button">X Reading</button>
+            <button class="secondary-button danger" id="posYReadingButton" type="button">Y Reading / Close Shift</button>
+          </section>
+        </section>
+      </section>
+
+      <nav class="bottom-nav storecount-chrome" aria-label="Primary navigation" hidden>
         <button class="is-active" type="button" data-tab="upload" data-primary-nav="true">Import</button>
         <button type="button" data-tab="count" data-primary-nav="true">Stock List</button>
         <button type="button" data-tab="scan">Count / Scan</button>

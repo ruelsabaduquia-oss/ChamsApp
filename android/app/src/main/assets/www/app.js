@@ -2,11 +2,16 @@ const STORAGE_KEY = "storecount_inventory_v2";
 const BRANCH_KEY = "storecount_branch_v1";
 const AUDITOR_KEY = "storecount_auditor_v1";
 const AUDIT_HISTORY_KEY = "storecount_audit_history_v1";
+const APP_USER_KEY = "storecount_app_user_v1";
+const POS_SESSION_KEY = "storecount_pos_session_v1";
 
 let inventory = loadInventory();
 let branchName = loadBranchName();
 let auditorName = loadAuditorName();
 let auditHistory = loadAuditHistory();
+let appUser = loadAppUser();
+let activeModule = appUser ? "home" : "login";
+let posSession = loadPosSession();
 let viewingSavedAuditId = "";
 let selectedSku = null;
 let currentStatusFilter = "all";
@@ -20,16 +25,35 @@ let scanner = {
   lockedCode: "",
   clearFrames: 0,
 };
+let posScanner = {
+  detector: null,
+  stream: null,
+  active: false,
+  lockedCode: "",
+  clearFrames: 0,
+};
 
 const $ = (selector) => document.querySelector(selector);
 const emptyTemplate = $("#emptyStateTemplate");
 
 const elements = {
+  authScreen: $("#authScreen"),
+  appShell: $("#appShell"),
+  appLoginForm: $("#appLoginForm"),
+  appUsernameInput: $("#appUsernameInput"),
+  appPasswordInput: $("#appPasswordInput"),
+  homePanel: $("#homePanel"),
+  screenTitle: $("#screenTitle"),
+  homeButton: $("#homeButton"),
+  openStoreCountButton: $("#openStoreCountButton"),
+  openPosButton: $("#openPosButton"),
+  storeCountChrome: document.querySelectorAll(".storecount-chrome"),
   tabs: document.querySelectorAll(".tab"),
   panels: {
     upload: $("#uploadPanel"),
     count: $("#countPanel"),
     report: $("#reportPanel"),
+    pos: $("#posPanel"),
   },
   totalSku: $("#totalSku"),
   countedSku: $("#countedSku"),
@@ -98,6 +122,34 @@ const elements = {
   downloadReportButton: $("#downloadReportButton"),
   downloadExcelButton: $("#downloadExcelButton"),
   installButton: $("#installButton"),
+  posCrewCard: $("#posCrewCard"),
+  posFloatCard: $("#posFloatCard"),
+  posRegister: $("#posRegister"),
+  posCrewLabel: $("#posCrewLabel"),
+  posStatusBadge: $("#posStatusBadge"),
+  posCrewLoginForm: $("#posCrewLoginForm"),
+  posCrewUsernameInput: $("#posCrewUsernameInput"),
+  posCrewPasswordInput: $("#posCrewPasswordInput"),
+  posFloatForm: $("#posFloatForm"),
+  posFloatInput: $("#posFloatInput"),
+  posFloatDisplay: $("#posFloatDisplay"),
+  posCartTotal: $("#posCartTotal"),
+  posSalesTotal: $("#posSalesTotal"),
+  posCartCount: $("#posCartCount"),
+  posCartRows: $("#posCartRows"),
+  posScanVideo: $("#posScanVideo"),
+  posScannerPlaceholder: $("#posScannerPlaceholder"),
+  posScanButton: $("#posScanButton"),
+  posStopScanButton: $("#posStopScanButton"),
+  posScanStatus: $("#posScanStatus"),
+  posManualBarcodeForm: $("#posManualBarcodeForm"),
+  posBarcodeInput: $("#posBarcodeInput"),
+  posCompleteSaleButton: $("#posCompleteSaleButton"),
+  posClearCartButton: $("#posClearCartButton"),
+  posXReadingButton: $("#posXReadingButton"),
+  posYReadingButton: $("#posYReadingButton"),
+  posReadingLabel: $("#posReadingLabel"),
+  posReadingDetails: $("#posReadingDetails"),
 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -107,9 +159,15 @@ function init() {
   elements.auditorInput.value = auditorName;
   bindEvents();
   render();
+  renderAppShell();
 }
 
 function bindEvents() {
+  elements.appLoginForm.addEventListener("submit", handleAppLogin);
+  elements.homeButton.addEventListener("click", () => showModuleHome());
+  elements.openStoreCountButton.addEventListener("click", () => showStoreCount());
+  elements.openPosButton.addEventListener("click", () => showPos());
+
   elements.tabs.forEach((tab) => {
     tab.addEventListener("click", () => setTab(tab.dataset.tab));
   });
@@ -194,6 +252,19 @@ function bindEvents() {
     handleScannedCode(elements.barcodeInput.value, "manual");
     elements.barcodeInput.value = "";
   });
+  elements.posCrewLoginForm.addEventListener("submit", handlePosCrewLogin);
+  elements.posFloatForm.addEventListener("submit", handlePosFloat);
+  elements.posScanButton.addEventListener("click", startPosScanner);
+  elements.posStopScanButton.addEventListener("click", stopPosScanner);
+  elements.posManualBarcodeForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handlePosBarcode(elements.posBarcodeInput.value, "manual");
+    elements.posBarcodeInput.value = "";
+  });
+  elements.posCompleteSaleButton.addEventListener("click", completePosSale);
+  elements.posClearCartButton.addEventListener("click", clearPosCart);
+  elements.posXReadingButton.addEventListener("click", () => renderPosReading("X"));
+  elements.posYReadingButton.addEventListener("click", closePosShift);
 
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -211,6 +282,9 @@ function bindEvents() {
 }
 
 function setTab(name, activeNav = null) {
+  activeModule = "storecount";
+  elements.homePanel.classList.remove("is-active");
+  elements.storeCountChrome.forEach((item) => (item.hidden = false));
   const panelName = name === "scan" ? "count" : name;
   elements.tabs.forEach((tab) => tab.classList.toggle("is-active", tab.dataset.tab === panelName));
   elements.bottomNav.forEach((button) => {
@@ -224,6 +298,67 @@ function setTab(name, activeNav = null) {
   });
   if (name === "report") renderReport();
   if (name === "scan") openScanMode();
+  updateScreenTitle(panelName === "count" ? "Stock List" : panelName === "report" ? "Reports" : "Import");
+}
+
+function handleAppLogin(event) {
+  event.preventDefault();
+  const username = elements.appUsernameInput.value.trim();
+  const password = elements.appPasswordInput.value.trim();
+  if (!username || !password) {
+    alert("Enter username and password.");
+    return;
+  }
+
+  appUser = { username, loggedAt: new Date().toISOString() };
+  saveAppUser();
+  elements.appLoginForm.reset();
+  showModuleHome();
+}
+
+function renderAppShell() {
+  const loggedIn = Boolean(appUser);
+  elements.authScreen.hidden = loggedIn;
+  elements.appShell.hidden = !loggedIn;
+  if (!loggedIn) return;
+  if (activeModule === "pos") showPos();
+  else if (activeModule === "storecount") showStoreCount();
+  else showModuleHome();
+}
+
+function showModuleHome() {
+  activeModule = "home";
+  stopScanner();
+  stopPosScanner();
+  elements.authScreen.hidden = true;
+  elements.appShell.hidden = false;
+  elements.homePanel.classList.add("is-active");
+  Object.values(elements.panels).forEach((panel) => panel.classList.remove("is-active"));
+  elements.storeCountChrome.forEach((item) => (item.hidden = true));
+  updateScreenTitle("Home");
+}
+
+function showStoreCount() {
+  activeModule = "storecount";
+  elements.homePanel.classList.remove("is-active");
+  elements.storeCountChrome.forEach((item) => (item.hidden = false));
+  setTab("upload");
+}
+
+function showPos() {
+  activeModule = "pos";
+  stopScanner();
+  elements.homePanel.classList.remove("is-active");
+  elements.storeCountChrome.forEach((item) => (item.hidden = true));
+  Object.entries(elements.panels).forEach(([key, panel]) => {
+    panel.classList.toggle("is-active", key === "pos");
+  });
+  updateScreenTitle("POS");
+  renderPos();
+}
+
+function updateScreenTitle(title) {
+  elements.screenTitle.textContent = title;
 }
 
 async function handleFileUpload(event) {
@@ -237,6 +372,7 @@ async function handleFileUpload(event) {
   const descIndex = headers.findIndex((header) => ["description", "desc", "item description"].includes(header));
   const qtyIndex = headers.findIndex((header) => ["qty", "quantity", "count", "stock"].includes(header));
   const barcodeIndex = headers.findIndex((header) => ["barcode", "bar code", "upc", "ean"].includes(header));
+  const priceIndex = headers.findIndex((header) => ["price", "selling price", "retail price", "srp", "unit price"].includes(header));
   const keepBaseline = getInitStrategy() === "baseline";
 
   if (skuIndex === -1 || descIndex === -1) {
@@ -250,7 +386,8 @@ async function handleFileUpload(event) {
       row[descIndex],
       keepBaseline && qtyIndex !== -1 ? row[qtyIndex] : 0,
       keepBaseline,
-      barcodeIndex !== -1 ? row[barcodeIndex] : ""
+      barcodeIndex !== -1 ? row[barcodeIndex] : "",
+      priceIndex !== -1 ? row[priceIndex] : ""
     );
   });
 
@@ -275,10 +412,11 @@ function handleManualAdd(event) {
   render();
 }
 
-function upsertSku(code, description, qty = null, saved = null, barcode = "") {
+function upsertSku(code, description, qty = null, saved = null, barcode = "", price = "") {
   const cleanCode = String(code || "").trim();
   const cleanDescription = String(description || "").trim();
   const cleanBarcode = String(barcode || "").trim();
+  const cleanPrice = sanitizeMoney(price);
   const shouldSetQty = qty !== null;
   const cleanQty = shouldSetQty ? sanitizeQty(qty) : 0;
   if (!cleanCode || !cleanDescription) return false;
@@ -287,6 +425,7 @@ function upsertSku(code, description, qty = null, saved = null, barcode = "") {
   if (existing) {
     existing.description = cleanDescription;
     existing.barcode = cleanBarcode || existing.barcode || "";
+    if (cleanPrice > 0) existing.price = cleanPrice;
     if (shouldSetQty) existing.qty = cleanQty;
     if (saved !== null) {
       existing.saved = Boolean(saved);
@@ -299,6 +438,7 @@ function upsertSku(code, description, qty = null, saved = null, barcode = "") {
     code: cleanCode,
     description: cleanDescription,
     barcode: cleanBarcode,
+    price: cleanPrice,
     qty: cleanQty,
     saved: Boolean(saved),
     updatedAt: saved ? new Date().toISOString() : null,
@@ -313,6 +453,7 @@ function render() {
   renderReport();
   renderSavedAudits();
   renderSelectedSku();
+  renderPos();
 }
 
 function renderCatalogPreview() {
@@ -649,6 +790,312 @@ function stopScanner() {
   elements.stopScanButton.hidden = true;
   elements.scanButton.hidden = false;
   elements.scanStatus.textContent = "READY";
+}
+
+function handlePosCrewLogin(event) {
+  event.preventDefault();
+  const username = elements.posCrewUsernameInput.value.trim();
+  const password = elements.posCrewPasswordInput.value.trim();
+  if (!username || !password) {
+    alert("Enter crew username and password.");
+    return;
+  }
+
+  posSession.crew = username;
+  posSession.startedAt = new Date().toISOString();
+  posSession.float = 0;
+  posSession.active = false;
+  posSession.cart = [];
+  posSession.sales = posSession.sales || [];
+  savePosSession();
+  elements.posCrewLoginForm.reset();
+  renderPos();
+}
+
+function handlePosFloat(event) {
+  event.preventDefault();
+  const floatAmount = sanitizeMoney(elements.posFloatInput.value);
+  if (floatAmount <= 0 && !confirm("Opening float is zero. Continue?")) return;
+
+  posSession.float = floatAmount;
+  posSession.active = true;
+  posSession.startedAt = posSession.startedAt || new Date().toISOString();
+  savePosSession();
+  elements.posFloatForm.reset();
+  renderPos();
+}
+
+function renderPos() {
+  const hasCrew = Boolean(posSession.crew);
+  const hasActiveRegister = hasCrew && posSession.active;
+  elements.posCrewCard.hidden = hasCrew;
+  elements.posFloatCard.hidden = !hasCrew || hasActiveRegister;
+  elements.posRegister.hidden = !hasActiveRegister;
+  elements.posCrewLabel.textContent = hasCrew ? `Crew: ${posSession.crew}` : "Crew not signed in";
+  elements.posStatusBadge.textContent = hasActiveRegister ? "Open" : "Closed";
+  renderPosCart();
+  renderPosSummary();
+}
+
+function renderPosSummary() {
+  const cartTotal = getPosCartTotal();
+  const salesTotal = getPosSalesTotal();
+  elements.posFloatDisplay.textContent = formatMoney(posSession.float || 0);
+  elements.posCartTotal.textContent = formatMoney(cartTotal);
+  elements.posSalesTotal.textContent = formatMoney(salesTotal);
+  elements.posCartCount.textContent = `${getPosCartQty().toLocaleString()} items`;
+}
+
+function renderPosCart() {
+  elements.posCartRows.innerHTML = "";
+  if (!posSession.cart.length) {
+    elements.posCartRows.innerHTML = `<div class="empty-state"><strong>No items</strong><p>Scan or type an item barcode.</p></div>`;
+    renderPosSummary();
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  posSession.cart.forEach((line) => {
+    const row = document.createElement("div");
+    row.className = "pos-cart-row";
+    row.innerHTML = `
+      <div>
+        <strong>${escapeHtml(line.code)}</strong>
+        <span>${escapeHtml(line.description)}</span>
+        <small>${formatMoney(line.price)} each</small>
+      </div>
+      <label>
+        <span>Qty</span>
+        <input type="number" min="1" step="1" inputmode="numeric" value="${Number(line.qty || 1)}" data-pos-qty="${escapeHtml(line.code)}" />
+      </label>
+      <p>${formatMoney(Number(line.qty || 0) * Number(line.price || 0))}</p>
+      <button class="secondary-button danger" type="button" data-pos-void="${escapeHtml(line.code)}">Void</button>
+    `;
+    fragment.appendChild(row);
+  });
+  elements.posCartRows.appendChild(fragment);
+  elements.posCartRows.querySelectorAll("[data-pos-qty]").forEach((input) => {
+    input.addEventListener("change", () => updatePosLineQty(input.dataset.posQty, input.value));
+  });
+  elements.posCartRows.querySelectorAll("[data-pos-void]").forEach((button) => {
+    button.addEventListener("click", () => voidPosLine(button.dataset.posVoid));
+  });
+  renderPosSummary();
+}
+
+async function startPosScanner() {
+  if (!posSession.active) {
+    elements.posScanStatus.textContent = "OPEN POS FIRST";
+    return;
+  }
+
+  if (!inventory.length) {
+    elements.posScanStatus.textContent = "LOAD SKU FIRST";
+    return;
+  }
+
+  if (!("BarcodeDetector" in window)) {
+    elements.posScanStatus.textContent = "CAMERA UNSUPPORTED";
+    alert("Camera scanning is unavailable on this device. Use Manual Barcode.");
+    return;
+  }
+
+  try {
+    posScanner.detector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e"] });
+    posScanner.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    elements.posScanVideo.srcObject = posScanner.stream;
+    elements.posScanVideo.hidden = false;
+    elements.posScannerPlaceholder.hidden = true;
+    elements.posStopScanButton.hidden = false;
+    elements.posScanButton.hidden = true;
+    posScanner.active = true;
+    posScanner.lockedCode = "";
+    posScanner.clearFrames = 0;
+    await elements.posScanVideo.play();
+    elements.posScanStatus.textContent = "SCANNING";
+    posScanLoop();
+  } catch {
+    elements.posScanStatus.textContent = "Camera could not start.";
+  }
+}
+
+async function posScanLoop() {
+  if (!posScanner.active) return;
+
+  try {
+    const barcodes = await posScanner.detector.detect(elements.posScanVideo);
+    const found = normalizeBarcode(barcodes[0]?.rawValue || "");
+
+    if (!found) {
+      posScanner.clearFrames += 1;
+      if (posScanner.clearFrames >= 8) posScanner.lockedCode = "";
+    } else if (found !== posScanner.lockedCode) {
+      posScanner.lockedCode = found;
+      posScanner.clearFrames = 0;
+      handlePosBarcode(found, "camera");
+    } else {
+      posScanner.clearFrames = 0;
+      elements.posScanStatus.textContent = "READ - MOVE ITEM";
+    }
+  } catch {
+    elements.posScanStatus.textContent = "PAUSED";
+  }
+
+  requestAnimationFrame(posScanLoop);
+}
+
+function stopPosScanner() {
+  posScanner.active = false;
+  posScanner.stream?.getTracks().forEach((track) => track.stop());
+  posScanner.stream = null;
+  if (!elements.posScanVideo) return;
+  elements.posScanVideo.hidden = true;
+  elements.posScannerPlaceholder.hidden = false;
+  elements.posStopScanButton.hidden = true;
+  elements.posScanButton.hidden = false;
+  elements.posScanStatus.textContent = "READY";
+}
+
+function handlePosBarcode(rawCode, source = "manual") {
+  if (!posSession.active) {
+    elements.posScanStatus.textContent = "OPEN POS FIRST";
+    return;
+  }
+
+  const cleanCode = normalizeBarcode(rawCode);
+  if (!cleanCode) return;
+
+  const item = inventory.find((sku) => normalizeBarcode(sku.barcode) === cleanCode || normalizeBarcode(sku.code) === cleanCode);
+  if (!item) {
+    elements.posScanStatus.textContent = source === "manual" ? `TYPED UNKNOWN ${cleanCode}` : `UNKNOWN ${cleanCode}`;
+    triggerHaptic();
+    playScanBeep(180, 180);
+    return;
+  }
+
+  const price = ensurePosPrice(item);
+  if (price === null) {
+    elements.posScanStatus.textContent = "PRICE REQUIRED";
+    return;
+  }
+
+  const existing = posSession.cart.find((line) => line.code === item.code);
+  if (existing) {
+    existing.qty = Number(existing.qty || 0) + 1;
+  } else {
+    posSession.cart.push({
+      code: item.code,
+      description: item.description,
+      barcode: item.barcode || "",
+      price,
+      qty: 1,
+    });
+  }
+
+  savePosSession();
+  renderPosCart();
+  elements.posScanStatus.textContent = source === "manual" ? `TYPED ${item.code}` : `ADDED ${item.code}`;
+  triggerHaptic();
+  playScanBeep();
+}
+
+function ensurePosPrice(item) {
+  let price = sanitizeMoney(item.price);
+  if (price > 0) return price;
+
+  const entered = prompt(`Enter selling price for ${item.description}`, "0.00");
+  if (entered === null) return null;
+  price = sanitizeMoney(entered);
+  if (price <= 0) {
+    alert("Price must be greater than zero.");
+    return null;
+  }
+
+  item.price = price;
+  saveInventory();
+  return price;
+}
+
+function updatePosLineQty(code, value) {
+  const line = posSession.cart.find((item) => item.code === code);
+  if (!line) return;
+  line.qty = Math.max(1, sanitizeQty(value));
+  savePosSession();
+  renderPosCart();
+}
+
+function voidPosLine(code) {
+  if (!confirm("Void this item from the current transaction?")) return;
+  posSession.cart = posSession.cart.filter((item) => item.code !== code);
+  savePosSession();
+  renderPosCart();
+}
+
+function clearPosCart() {
+  if (!posSession.cart.length) return;
+  if (!confirm("Void entire current transaction?")) return;
+  posSession.cart = [];
+  savePosSession();
+  renderPosCart();
+}
+
+function completePosSale() {
+  if (!posSession.cart.length) {
+    alert("No items in transaction.");
+    return;
+  }
+
+  const total = getPosCartTotal();
+  const sale = {
+    id: `${new Date().toISOString()}-${Math.random().toString(36).slice(2, 8)}`,
+    crew: posSession.crew,
+    createdAt: new Date().toISOString(),
+    total,
+    items: posSession.cart.map((line) => ({ ...line })),
+  };
+  posSession.sales.unshift(sale);
+  posSession.cart = [];
+  savePosSession();
+  renderPos();
+  alert(`Sale completed: ${formatMoney(total)}`);
+}
+
+function renderPosReading(type) {
+  const salesTotal = getPosSalesTotal();
+  const transactionCount = posSession.sales.length;
+  const itemCount = posSession.sales.reduce((sum, sale) => sum + sale.items.reduce((lineSum, item) => lineSum + Number(item.qty || 0), 0), 0);
+  elements.posReadingLabel.textContent = `${type} Reading`;
+  elements.posReadingDetails.innerHTML = `
+    <strong>${type} Reading</strong>
+    <span>Crew: ${escapeHtml(posSession.crew || "Not set")}</span>
+    <span>Started: ${escapeHtml(posSession.startedAt ? formatAuditDate(posSession.startedAt) : "Not set")}</span>
+    <span>Float: ${formatMoney(posSession.float || 0)}</span>
+    <span>Transactions: ${transactionCount.toLocaleString()} | Items: ${itemCount.toLocaleString()}</span>
+    <span>Gross Sales: ${formatMoney(salesTotal)}</span>
+  `;
+}
+
+function closePosShift() {
+  if (!posSession.active) return;
+  renderPosReading("Y");
+  if (!confirm("Y Reading will close the current POS shift. Continue?")) return;
+  if (posSession.cart.length && !confirm("There is an active transaction. Close and void it?")) return;
+  posSession = createEmptyPosSession();
+  savePosSession();
+  stopPosScanner();
+  renderPos();
+}
+
+function getPosCartTotal() {
+  return posSession.cart.reduce((sum, line) => sum + Number(line.qty || 0) * Number(line.price || 0), 0);
+}
+
+function getPosCartQty() {
+  return posSession.cart.reduce((sum, line) => sum + Number(line.qty || 0), 0);
+}
+
+function getPosSalesTotal() {
+  return posSession.sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
 }
 
 function triggerHaptic() {
@@ -1249,6 +1696,16 @@ function sanitizeQty(value) {
   return Math.max(0, Math.floor(Number(value || 0)));
 }
 
+function sanitizeMoney(value) {
+  const cleaned = String(value ?? "").replace(/,/g, "").trim();
+  const amount = Number(cleaned || 0);
+  return Number.isFinite(amount) ? Math.max(0, Math.round(amount * 100) / 100) : 0;
+}
+
+function formatMoney(value) {
+  return sanitizeMoney(value).toLocaleString([], { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function normalizeBarcode(value) {
   return String(value || "")
     .trim()
@@ -1283,6 +1740,18 @@ function loadInventory() {
   }
 }
 
+function saveAppUser() {
+  localStorage.setItem(APP_USER_KEY, JSON.stringify(appUser));
+}
+
+function loadAppUser() {
+  try {
+    return JSON.parse(localStorage.getItem(APP_USER_KEY)) || null;
+  } catch {
+    return null;
+  }
+}
+
 function saveBranchName() {
   localStorage.setItem(BRANCH_KEY, branchName);
 }
@@ -1309,6 +1778,29 @@ function loadAuditHistory() {
   } catch {
     return [];
   }
+}
+
+function savePosSession() {
+  localStorage.setItem(POS_SESSION_KEY, JSON.stringify(posSession));
+}
+
+function loadPosSession() {
+  try {
+    return { ...createEmptyPosSession(), ...(JSON.parse(localStorage.getItem(POS_SESSION_KEY)) || {}) };
+  } catch {
+    return createEmptyPosSession();
+  }
+}
+
+function createEmptyPosSession() {
+  return {
+    crew: "",
+    float: 0,
+    active: false,
+    startedAt: "",
+    cart: [],
+    sales: [],
+  };
 }
 
 function formatAuditDate(isoDate) {
