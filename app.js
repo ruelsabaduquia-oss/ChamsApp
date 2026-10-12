@@ -1297,7 +1297,7 @@ function startPosTransaction() {
   startPosScanner();
 }
 
-function completePosSale() {
+async function completePosSale() {
   if (!posSession.transactionActive) {
     startPosTransaction();
     return;
@@ -1314,7 +1314,7 @@ function completePosSale() {
   }
 
   const total = getPosCartTotal();
-  const payment = collectPosPayment(total);
+  const payment = await collectPosPayment(total);
   if (!payment) return;
 
   const sale = {
@@ -1336,20 +1336,20 @@ function completePosSale() {
   renderPos();
   if (payment.method === "cash") {
     alert(`Cash out completed.\nTotal: ${formatMoney(total)}\nCash: ${formatMoney(payment.amountTendered)}\nChange: ${formatMoney(payment.change)}`);
-  } else {
+  } else if (payment.method === "gcash") {
     alert(`GCash payment recorded.\nTotal: ${formatMoney(total)}\nReference: ${payment.reference}`);
+  } else {
+    alert(`Credit/Debit Card payment recorded.\nTotal: ${formatMoney(total)}\nReference: ${payment.reference}`);
   }
 }
 
 function collectPosPayment(total) {
-  const methodInput = prompt(`Payment method for ${formatMoney(total)}\n\nType CASH or GCASH`, "cash");
-  if (methodInput === null) return null;
+  return openPaymentDialog(total);
+}
 
-  const method = methodInput.trim().toLowerCase();
+function buildPayment(method, total, inputValue = "") {
   if (method === "cash") {
-    const tenderedInput = prompt(`Total purchase: ${formatMoney(total)}\nEnter cash given by customer`, formatMoney(total));
-    if (tenderedInput === null) return null;
-    const amountTendered = sanitizeMoney(tenderedInput);
+    const amountTendered = sanitizeMoney(inputValue);
     if (amountTendered < total) {
       alert("Cash amount is less than total purchase.");
       return null;
@@ -1364,17 +1364,15 @@ function collectPosPayment(total) {
     };
   }
 
-  if (method === "gcash" || method === "g-cash") {
-    const reference = prompt(`GCash exact payment: ${formatMoney(total)}\nEnter GCash reference number`, "");
-    if (reference === null) return null;
-    const cleanReference = reference.trim();
+  if (method === "gcash" || method === "card") {
+    const cleanReference = String(inputValue || "").trim();
     if (!cleanReference) {
-      alert("GCash reference number is required.");
+      alert(method === "gcash" ? "GCash reference number is required." : "Card reference number is required.");
       return null;
     }
 
     return {
-      method: "gcash",
+      method,
       amountPaid: total,
       amountTendered: total,
       change: 0,
@@ -1382,14 +1380,99 @@ function collectPosPayment(total) {
     };
   }
 
-  alert("Payment method must be CASH or GCASH.");
   return null;
+}
+
+function openPaymentDialog(total) {
+  stopPosScanner();
+
+  return new Promise((resolve) => {
+    let selectedMethod = "cash";
+    const overlay = document.createElement("div");
+    overlay.className = "payment-overlay";
+    overlay.innerHTML = `
+      <form class="payment-dialog">
+        <div class="section-heading">
+          <h2>Cash Out</h2>
+          <span>Total ${formatMoney(total)}</span>
+        </div>
+        <div class="payment-methods" role="group" aria-label="Payment method">
+          <button class="is-active" type="button" data-payment-method="cash">Cash</button>
+          <button type="button" data-payment-method="gcash">GCash</button>
+          <button type="button" data-payment-method="card">Credit/Debit Card</button>
+        </div>
+        <label>
+          <span id="paymentInputLabel">Cash Given</span>
+          <input id="paymentValueInput" type="number" min="0" step="0.01" inputmode="decimal" value="${formatMoney(total).replace(/,/g, "")}" />
+        </label>
+        <div class="payment-summary" id="paymentSummary">Change: 0.00</div>
+        <div class="approval-actions">
+          <button class="secondary-button" type="button" data-payment-cancel>Cancel</button>
+          <button class="primary-button" type="submit">Confirm Payment</button>
+        </div>
+      </form>
+    `;
+
+    document.body.appendChild(overlay);
+    const form = overlay.querySelector("form");
+    const input = overlay.querySelector("#paymentValueInput");
+    const label = overlay.querySelector("#paymentInputLabel");
+    const summary = overlay.querySelector("#paymentSummary");
+    const methodButtons = overlay.querySelectorAll("[data-payment-method]");
+
+    function close(value) {
+      overlay.remove();
+      resolve(value);
+    }
+
+    function renderPaymentInput() {
+      methodButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.paymentMethod === selectedMethod));
+      if (selectedMethod === "cash") {
+        label.textContent = "Cash Given";
+        input.type = "number";
+        input.inputMode = "decimal";
+        input.value = input.value || formatMoney(total).replace(/,/g, "");
+        summary.textContent = `Change: ${formatMoney(Math.max(sanitizeMoney(input.value) - total, 0))}`;
+      } else {
+        label.textContent = selectedMethod === "gcash" ? "GCash Reference Number" : "Card Reference Number";
+        input.type = "text";
+        input.inputMode = "text";
+        input.value = "";
+        summary.textContent = `Payment: ${formatMoney(total)}`;
+      }
+      input.focus();
+    }
+
+    methodButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedMethod = button.dataset.paymentMethod;
+        renderPaymentInput();
+      });
+    });
+
+    input.addEventListener("input", () => {
+      if (selectedMethod === "cash") {
+        summary.textContent = `Change: ${formatMoney(Math.max(sanitizeMoney(input.value) - total, 0))}`;
+      }
+    });
+
+    overlay.querySelector("[data-payment-cancel]").addEventListener("click", () => close(null));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const payment = buildPayment(selectedMethod, total, input.value);
+      if (!payment) return;
+      close(payment);
+    });
+
+    renderPaymentInput();
+  });
 }
 
 function renderPosReading(type) {
   const salesTotal = getPosSalesTotal();
   const cashTotal = getPosPaymentTotal("cash");
   const gcashTotal = getPosPaymentTotal("gcash");
+  const cardTotal = getPosPaymentTotal("card");
   const transactionCount = posSession.sales.length;
   const itemCount = posSession.sales.reduce((sum, sale) => sum + sale.items.reduce((lineSum, item) => lineSum + Number(item.qty || 0), 0), 0);
   elements.posReadingLabel.textContent = `${type} Reading`;
@@ -1402,6 +1485,7 @@ function renderPosReading(type) {
     <span>Gross Sales: ${formatMoney(salesTotal)}</span>
     <span>Cash Sales: ${formatMoney(cashTotal)}</span>
     <span>GCash Sales: ${formatMoney(gcashTotal)}</span>
+    <span>Credit/Debit Card Sales: ${formatMoney(cardTotal)}</span>
     <span>Total Cash: ${formatMoney(Number(posSession.float || 0) + cashTotal)}</span>
   `;
 }

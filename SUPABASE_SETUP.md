@@ -60,6 +60,18 @@ After `supabase/user_auth.sql` is complete:
 
 This creates the table used when crew requests a supervisor-approved void.
 
+## Allow Card Payments
+
+After `supabase/schema.sql` is complete:
+
+1. Go to **SQL Editor** again.
+2. Open `supabase/payment_methods.sql` from this project.
+3. Copy the full SQL script.
+4. Paste it into Supabase SQL Editor.
+5. Click **Run**.
+
+This allows POS uploads for Cash, GCash, and Credit/Debit Card payments.
+
 ## Important Key Safety
 
 The app can use the Supabase **anon public** key.
