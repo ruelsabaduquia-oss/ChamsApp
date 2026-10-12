@@ -13,6 +13,7 @@ let appUser = loadAppUser();
 let activeModule = appUser ? "home" : "login";
 let posSession = loadPosSession();
 let viewingSavedAuditId = "";
+let posRecoveryNoticeShown = false;
 let selectedSku = null;
 let currentStatusFilter = "all";
 let currentReportFilter = "in-stock";
@@ -818,7 +819,11 @@ function handlePosCrewLogin(event) {
 function handlePosFloat(event) {
   event.preventDefault();
   const floatAmount = sanitizeMoney(elements.posFloatInput.value);
-  if (floatAmount <= 0 && !confirm("Opening float is zero. Continue?")) return;
+  if (floatAmount <= 0) {
+    alert("Change fund is mandatory. Enter the cashier's opening change fund before starting POS.");
+    elements.posFloatInput.focus();
+    return;
+  }
 
   posSession.float = floatAmount;
   posSession.active = true;
@@ -840,8 +845,16 @@ function renderPos() {
   elements.posCompleteSaleButton.textContent = posSession.transactionActive ? "Cash Out" : "Start Transaction";
   elements.posScanButton.hidden = !posSession.transactionActive || posScanner.active;
   elements.posStopScanButton.hidden = !posScanner.active;
+  showPosRecoveryNotice();
   renderPosCart();
   renderPosSummary();
+}
+
+function showPosRecoveryNotice() {
+  if (posRecoveryNoticeShown || !posSession.transactionActive || !posSession.cart.length) return;
+  posRecoveryNoticeShown = true;
+  elements.posScanStatus.textContent = "UNPAID TRANSACTION";
+  alert("Unpaid transaction recovered. Items are still in the cart. Complete Cash Out before starting another customer.");
 }
 
 function renderPosSummary() {
@@ -1080,6 +1093,11 @@ function handlePosTransactionButton() {
 function startPosTransaction() {
   if (!posSession.active) {
     alert("Open POS and enter change fund first.");
+    return;
+  }
+
+  if (posSession.transactionActive && posSession.cart.length) {
+    alert("There is an unpaid transaction in the cart. Complete Cash Out first.");
     return;
   }
 
