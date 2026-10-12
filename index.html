@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f766e" />
+    <title>StoreCount Inventory</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="top-bar">
+        <div class="brand-block">
+          <div class="app-mark" aria-hidden="true">SC</div>
+          <div>
+            <p class="eyebrow">StockCount Pro <span>#412</span></p>
+            <h1>Stock List</h1>
+          </div>
+        </div>
+        <div class="header-actions">
+          <span class="live-pill">Live</span>
+          <button class="icon-button" id="installButton" type="button" title="Install app" hidden>
+            <span aria-hidden="true">+</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="audit-card" aria-label="Inventory summary">
+        <div class="audit-card-head">
+          <strong>Audit Progress</strong>
+          <span id="progressLabel">0% Complete</span>
+        </div>
+        <div class="summary-grid">
+          <article>
+            <span id="totalSku">0</span>
+            <p>Total SKUs</p>
+          </article>
+          <article>
+            <span id="countedSku">0</span>
+            <p>Counted</p>
+          </article>
+          <article>
+            <span id="pendingSku">0</span>
+            <p>Pending</p>
+          </article>
+        </div>
+        <div class="progress-track"><span id="progressBar"></span></div>
+      </section>
+
+      <nav class="tabs" aria-label="Inventory sections">
+        <button class="tab is-active" type="button" data-tab="upload">Upload</button>
+        <button class="tab" type="button" data-tab="count">Count</button>
+        <button class="tab" type="button" data-tab="report">Report</button>
+      </nav>
+
+      <section class="panel is-active" id="uploadPanel">
+        <div class="import-banner">
+          <div class="banner-top">
+            <span>Step 01</span>
+            <strong>Pre-Audit Staging</strong>
+            <em>Scanner Ready</em>
+          </div>
+          <h2>Upload SKU Catalog</h2>
+          <p>Import the stock master file before the physical count shift.</p>
+          <div class="category-pills" aria-label="Common departments">
+            <span>Beverages</span>
+            <span>Snacks</span>
+            <span>Dairy</span>
+            <span>Tobacco</span>
+            <span>Essentials</span>
+          </div>
+        </div>
+
+        <label class="upload-zone" for="skuFile">
+          <input id="skuFile" type="file" accept=".csv,text/csv" />
+          <span class="upload-icon" aria-hidden="true">UP</span>
+          <strong>Tap or Drop Inventory File</strong>
+          <small>CSV spreadsheet. Required: SKU Code | Description. Optional: Qty</small>
+        </label>
+
+        <section class="setup-card" aria-label="Count mode setup">
+          <div class="section-heading">
+            <h2>Count Mode Setup</h2>
+            <span>Required</span>
+          </div>
+          <label class="branch-field">
+            <span>Branch</span>
+            <input id="branchInput" type="text" autocomplete="organization" placeholder="Enter branch name or store code" />
+          </label>
+          <label class="auditor-field">
+            <span>Auditor</span>
+            <input id="auditorInput" type="text" autocomplete="name" placeholder="Enter auditor name before scanning" />
+          </label>
+          <label class="setup-option">
+            <input checked name="initStrategy" type="radio" value="blind" />
+            <span>
+              <strong>Reset quantities to 0</strong>
+              <small>Recommended for blind physical audits. Associates count shelves from zero.</small>
+            </span>
+          </label>
+          <label class="setup-option">
+            <input name="initStrategy" type="radio" value="baseline" />
+            <span>
+              <strong>Keep baseline file quantities</strong>
+              <small>Uses uploaded Qty as starting count when adjusting current floor numbers.</small>
+            </span>
+          </label>
+        </section>
+
+        <form class="manual-add" id="manualAddForm">
+          <div class="field-row">
+            <label>
+              <span>SKU Code</span>
+              <input id="skuCodeInput" type="text" autocomplete="off" placeholder="Enter SKU code" />
+            </label>
+            <label>
+              <span>Description</span>
+              <input id="descriptionInput" type="text" autocomplete="off" placeholder="Enter item description" />
+            </label>
+          </div>
+          <button class="primary-button" type="submit">Add SKU</button>
+        </form>
+
+        <div class="sample-box">
+          <p>CSV format</p>
+          <code>SKU Code,Description,Qty<br />Required,Required,Optional</code>
+        </div>
+
+        <section class="catalog-preview">
+          <div class="section-heading">
+            <h2>Catalog Preview</h2>
+            <span id="previewCount">No SKU loaded</span>
+          </div>
+          <div id="catalogPreviewRows"></div>
+        </section>
+
+        <div class="import-actions">
+          <button class="primary-button" id="beginCountingButton" type="button">Begin Counting</button>
+          <button class="secondary-button danger" id="clearAllButton" type="button">Clear File & Start Over</button>
+        </div>
+      </section>
+
+      <section class="panel" id="countPanel">
+        <div class="search-wrap">
+          <label>
+            <span>Find SKU</span>
+            <input id="searchInput" type="search" placeholder="Search code or description" autocomplete="off" />
+          </label>
+        </div>
+
+        <div class="status-tabs" aria-label="Filter SKU status">
+          <button class="status-filter is-active" type="button" data-filter="all">All SKUs</button>
+          <button class="status-filter" type="button" data-filter="pending">Pending</button>
+          <button class="status-filter" type="button" data-filter="counted">Counted</button>
+          <button class="status-filter" type="button" data-filter="zeroed">Zeroed</button>
+        </div>
+
+        <div class="list-meta">
+          <span>Displaying</span>
+          <strong id="visibleCount">0 of 0 SKUs</strong>
+        </div>
+
+        <div class="sku-list" id="skuList" aria-live="polite"></div>
+
+        <section class="count-sheet" id="countSheet" aria-live="polite" hidden>
+          <div class="sku-spotlight">
+            <div class="spotlight-top">
+              <div class="spotlight-badges">
+                <span id="selectedCode">SKU</span>
+                <small id="selectedStatus">Active Audit</small>
+              </div>
+              <strong>Active Audit</strong>
+            </div>
+            <div class="spotlight-body">
+              <div>
+                <h2 id="selectedDescription">No SKU selected</h2>
+                <p>Convenience Store • Count / Scan</p>
+              </div>
+              <div class="product-thumb" aria-hidden="true">SKU</div>
+            </div>
+            <div class="baseline-grid">
+              <div>
+                <span>Saved Qty</span>
+                <strong id="savedQty">0</strong>
+              </div>
+              <div>
+                <span>New Qty</span>
+                <strong id="newQty">0</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <strong id="varianceLabel">Pending</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="mode-tabs" aria-label="Counting mode">
+            <button class="mode-tab is-active" type="button" data-mode="scan">Barcode Stream</button>
+            <button class="mode-tab" type="button" data-mode="manual">Manual Keypad</button>
+          </div>
+
+          <div class="scan-box" id="scannerPane">
+            <div class="scanner-stage">
+              <video id="scanVideo" playsinline muted hidden></video>
+              <div class="scanner-placeholder" id="scannerPlaceholder">
+                <span></span>
+                <strong>Camera Viewfinder</strong>
+              </div>
+              <div class="reticle" aria-hidden="true"><span></span></div>
+            </div>
+            <div class="scan-head">
+              <strong>Barcode Capture</strong>
+              <span id="scanStatus">READY</span>
+            </div>
+            <div class="action-row">
+              <button class="secondary-button" id="scanButton" type="button">Scan Barcode [Auto]</button>
+              <button class="secondary-button" id="stopScanButton" type="button" hidden>Stop</button>
+            </div>
+            <form class="barcode-fallback" id="barcodeFallbackForm">
+              <label>
+                <span>Manual Barcode</span>
+                <input id="barcodeInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Enter barcode if camera scan is unavailable" />
+              </label>
+              <button class="secondary-button" type="submit">Add Scanned Item</button>
+            </form>
+          </div>
+
+          <div class="counter-panel">
+            <div class="counter-head">
+              <div>
+                <span>Physical Count Quantity</span>
+                <small>Tap numerals to type directly</small>
+              </div>
+              <button class="zero-button" id="clearQtyButton" type="button">Zero (0)</button>
+            </div>
+            <div class="qty-field">
+              <button type="button" data-step="-1" aria-label="Decrease quantity">−</button>
+              <label>
+                <input id="quantityInput" type="number" min="0" step="1" inputmode="numeric" />
+                <span>Individual Units</span>
+              </label>
+              <button type="button" data-step="1" aria-label="Increase quantity">+</button>
+            </div>
+          </div>
+
+          <div class="stepper">
+            <button type="button" data-step="-10">-10</button>
+            <button type="button" data-step="5">+5</button>
+            <button type="button" data-step="10">+10</button>
+            <button type="button" data-step="24"><strong>+24</strong><small>Case</small></button>
+          </div>
+
+          <div class="manual-keypad" id="manualKeypad" hidden>
+            <button type="button" data-key="1">1</button>
+            <button type="button" data-key="2">2</button>
+            <button type="button" data-key="3">3</button>
+            <button type="button" data-key="4">4</button>
+            <button type="button" data-key="5">5</button>
+            <button type="button" data-key="6">6</button>
+            <button type="button" data-key="7">7</button>
+            <button type="button" data-key="8">8</button>
+            <button type="button" data-key="9">9</button>
+            <button type="button" data-key="clear">CLR</button>
+            <button type="button" data-key="0">0</button>
+            <button type="button" data-key="backspace">⌫</button>
+          </div>
+
+          <div class="action-row sticky-actions">
+            <button class="primary-button" id="saveQtyButton" type="button">Save Count</button>
+            <button class="secondary-button" id="saveNextButton" type="button">Save & Next SKU</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel" id="reportPanel">
+        <div class="report-hero">
+          <div>
+            <span>Audit Batch #8841-A</span>
+            <h2>Physical Inventory Count Report</h2>
+            <p id="reportBranchLabel">Branch: Not set</p>
+          </div>
+          <strong id="reportReadyBadge">Ready</strong>
+        </div>
+
+        <div class="report-kpis">
+          <article>
+            <span>Total SKUs</span>
+            <strong id="reportTotalSku">0</strong>
+          </article>
+          <article>
+            <span>Units Counted</span>
+            <strong id="reportUnitsCounted">0</strong>
+          </article>
+          <article>
+            <span>Zeroed Items</span>
+            <strong id="reportZeroedSku">0</strong>
+          </article>
+        </div>
+
+        <div class="report-progress">
+          <div>
+            <span>Audit Progression Status</span>
+            <strong id="reportProgressText">0 / 0 SKUs Verified</strong>
+          </div>
+          <div class="report-progress-track">
+            <span id="reportVerifiedBar"></span>
+            <em id="reportZeroedBar"></em>
+          </div>
+        </div>
+
+        <div class="report-search">
+          <input id="reportSearchInput" type="search" placeholder="Filter by SKU or item name" autocomplete="off" />
+          <div class="report-filters" aria-label="Report filters">
+            <button class="report-filter is-active" type="button" data-report-filter="in-stock">Quantity &gt; 0 Only</button>
+          </div>
+        </div>
+
+        <div class="report-table-wrap">
+          <div class="report-table-head">
+            <h2 id="reportTableTitle">Audit Records</h2>
+            <span id="rowCountDisplay">0 Displayed</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>SKU Code</th>
+                <th>Description</th>
+                <th>Quantity</th>
+              </tr>
+            </thead>
+            <tbody id="reportBody"></tbody>
+          </table>
+        </div>
+
+        <div class="report-signoff">
+          <div class="signoff-mark">ID</div>
+          <div>
+            <span>Audited By Lead</span>
+            <strong id="reportBranchSignoff">Branch not set</strong>
+            <p id="reportAuditorSignoff">Auditor not set</p>
+            <small id="reportTimestamp">Ready for final review</small>
+          </div>
+        </div>
+
+        <section class="saved-audits" aria-label="Saved branch audits">
+          <div class="section-heading">
+            <h2>Saved Branch Counts</h2>
+            <span id="savedAuditCount">0 saved</span>
+          </div>
+          <label>
+            <span>Review Saved Count</span>
+            <select id="savedAuditSelect"></select>
+          </label>
+          <div class="saved-audit-details" id="savedAuditDetails">No finished audit saved yet.</div>
+          <button class="secondary-button" id="viewCurrentAuditButton" type="button" hidden>View Current Active Count</button>
+          <button class="secondary-button" id="exportSavedAuditButton" type="button">Export Selected Saved Count</button>
+        </section>
+
+        <div class="report-actions">
+          <button class="primary-button" id="doneCountingButton" type="button">Done Counting</button>
+          <button class="secondary-button" id="downloadReportButton" type="button">Export Report CSV</button>
+          <button class="secondary-button" id="downloadExcelButton" type="button">Export Excel XLSX</button>
+        </div>
+      </section>
+
+      <nav class="bottom-nav" aria-label="Primary navigation">
+        <button class="is-active" type="button" data-tab="upload" data-primary-nav="true">Import</button>
+        <button type="button" data-tab="count" data-primary-nav="true">Stock List</button>
+        <button type="button" data-tab="scan">Count / Scan</button>
+        <button type="button" data-tab="report" data-primary-nav="true">Reports</button>
+      </nav>
+    </main>
+
+    <template id="emptyStateTemplate">
+      <div class="empty-state">
+        <strong>No SKU loaded</strong>
+        <p>Upload or add SKU items to start counting.</p>
+      </div>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
