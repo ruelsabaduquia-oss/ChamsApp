@@ -31,6 +31,7 @@ let posScanner = {
   active: false,
   lockedCode: "",
   clearFrames: 0,
+  lastScanAt: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -135,6 +136,7 @@ const elements = {
   posFloatDisplay: $("#posFloatDisplay"),
   posCartTotal: $("#posCartTotal"),
   posSalesTotal: $("#posSalesTotal"),
+  posQtyDisplay: $("#posQtyDisplay"),
   posCartCount: $("#posCartCount"),
   posCartRows: $("#posCartRows"),
   posScanVideo: $("#posScanVideo"),
@@ -838,11 +840,12 @@ function renderPos() {
 }
 
 function renderPosSummary() {
-  const cartTotal = getPosCartTotal();
-  const salesTotal = getPosSalesTotal();
+  const cashSalesTotal = getPosPaymentTotal("cash");
+  const totalCash = Number(posSession.float || 0) + cashSalesTotal;
   elements.posFloatDisplay.textContent = formatMoney(posSession.float || 0);
-  elements.posCartTotal.textContent = formatMoney(cartTotal);
-  elements.posSalesTotal.textContent = formatMoney(salesTotal);
+  elements.posCartTotal.textContent = formatMoney(cashSalesTotal);
+  elements.posSalesTotal.textContent = formatMoney(totalCash);
+  elements.posQtyDisplay.textContent = getPosCartQty().toLocaleString();
   elements.posCartCount.textContent = `${getPosCartQty().toLocaleString()} items`;
 }
 
@@ -911,6 +914,7 @@ async function startPosScanner() {
     posScanner.active = true;
     posScanner.lockedCode = "";
     posScanner.clearFrames = 0;
+    posScanner.lastScanAt = 0;
     await elements.posScanVideo.play();
     elements.posScanStatus.textContent = "SCANNING";
     posScanLoop();
@@ -929,13 +933,14 @@ async function posScanLoop() {
     if (!found) {
       posScanner.clearFrames += 1;
       if (posScanner.clearFrames >= 8) posScanner.lockedCode = "";
-    } else if (found !== posScanner.lockedCode) {
+    } else if (found !== posScanner.lockedCode && Date.now() - posScanner.lastScanAt >= 1200) {
       posScanner.lockedCode = found;
       posScanner.clearFrames = 0;
+      posScanner.lastScanAt = Date.now();
       handlePosBarcode(found, "camera");
     } else {
       posScanner.clearFrames = 0;
-      elements.posScanStatus.textContent = "READ - MOVE ITEM";
+      elements.posScanStatus.textContent = "READ - WAIT";
     }
   } catch {
     elements.posScanStatus.textContent = "PAUSED";
@@ -1124,11 +1129,12 @@ function renderPosReading(type) {
     <strong>${type} Reading</strong>
     <span>Crew: ${escapeHtml(posSession.crew || "Not set")}</span>
     <span>Started: ${escapeHtml(posSession.startedAt ? formatAuditDate(posSession.startedAt) : "Not set")}</span>
-    <span>Float: ${formatMoney(posSession.float || 0)}</span>
+    <span>Change Fund: ${formatMoney(posSession.float || 0)}</span>
     <span>Transactions: ${transactionCount.toLocaleString()} | Items: ${itemCount.toLocaleString()}</span>
     <span>Gross Sales: ${formatMoney(salesTotal)}</span>
     <span>Cash Sales: ${formatMoney(cashTotal)}</span>
     <span>GCash Sales: ${formatMoney(gcashTotal)}</span>
+    <span>Total Cash: ${formatMoney(Number(posSession.float || 0) + cashTotal)}</span>
   `;
 }
 

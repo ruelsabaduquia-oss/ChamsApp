@@ -438,12 +438,12 @@
 
         <section class="setup-card" id="posFloatCard" hidden>
           <div class="section-heading">
-            <h2>Opening Float</h2>
+            <h2>Opening Change Fund</h2>
             <span>Required</span>
           </div>
           <form id="posFloatForm">
             <label>
-              <span>Float Amount</span>
+              <span>Change Fund Amount</span>
               <input id="posFloatInput" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
             </label>
             <button class="primary-button" type="submit">Start Transaction</button>
@@ -453,16 +453,20 @@
         <section class="pos-register" id="posRegister" hidden>
           <div class="pos-kpis">
             <article>
-              <span>Float</span>
+              <span>Change Fund</span>
               <strong id="posFloatDisplay">0.00</strong>
             </article>
             <article>
-              <span>Cart</span>
+              <span>Cash Sales</span>
               <strong id="posCartTotal">0.00</strong>
             </article>
             <article>
-              <span>Sales</span>
+              <span>Total Cash</span>
               <strong id="posSalesTotal">0.00</strong>
+            </article>
+            <article>
+              <span>Qty</span>
+              <strong id="posQtyDisplay">0</strong>
             </article>
           </div>
 

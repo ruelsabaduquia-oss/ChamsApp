@@ -1548,7 +1548,7 @@ button:disabled {
 
 .pos-kpis {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
 
@@ -1694,6 +1694,10 @@ th:last-child {
 
   .summary-grid {
     gap: 8px;
+  }
+
+  .pos-kpis {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .summary-grid article {
