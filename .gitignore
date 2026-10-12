@@ -19,3 +19,4 @@ Thumbs.db
 # Sensitive/import data files
 *.xlsx
 storecount_import_*.csv
+supabase_products_import_*.csv
