@@ -326,7 +326,7 @@ function setTab(name, activeNav = null) {
   updateScreenTitle(panelName === "count" ? "Stock List" : panelName === "report" ? "Reports" : "Import");
 }
 
-function handleAppLogin(event) {
+async function handleAppLogin(event) {
   event.preventDefault();
   const username = elements.appUsernameInput.value.trim();
   const password = elements.appPasswordInput.value.trim();
@@ -335,7 +335,10 @@ function handleAppLogin(event) {
     return;
   }
 
-  appUser = { username, loggedAt: new Date().toISOString() };
+  const verifiedUser = await verifyCloudUser(username, password, "app");
+  if (!verifiedUser) return;
+
+  appUser = { ...verifiedUser, loggedAt: new Date().toISOString() };
   saveAppUser();
   elements.appLoginForm.reset();
   showModuleHome();
@@ -832,7 +835,7 @@ function stopScanner() {
   elements.scanStatus.textContent = "READY";
 }
 
-function handlePosCrewLogin(event) {
+async function handlePosCrewLogin(event) {
   event.preventDefault();
   const username = elements.posCrewUsernameInput.value.trim();
   const password = elements.posCrewPasswordInput.value.trim();
@@ -841,7 +844,12 @@ function handlePosCrewLogin(event) {
     return;
   }
 
-  posSession.crew = username;
+  const verifiedUser = await verifyCloudUser(username, password, "pos");
+  if (!verifiedUser) return;
+
+  posSession.crew = verifiedUser.displayName || verifiedUser.username;
+  posSession.crewUsername = verifiedUser.username;
+  posSession.crewRole = verifiedUser.role;
   posSession.startedAt = new Date().toISOString();
   posSession.float = 0;
   posSession.active = false;
@@ -1452,6 +1460,48 @@ async function writeSyncLog(syncType, status, message) {
   } catch {
     // Sync logs should never block the actual product or sales sync.
   }
+}
+
+async function verifyCloudUser(username, password, requiredArea) {
+  try {
+    const rows = await supabaseRequest("/rest/v1/rpc/verify_app_user", {
+      method: "POST",
+      body: JSON.stringify({
+        input_username: username,
+        input_password: password,
+        required_area: requiredArea,
+      }),
+    });
+
+    const user = rows[0];
+    if (!user) {
+      alert(requiredArea === "pos" ? "Invalid crew username or password." : "Invalid username or password.");
+      return null;
+    }
+
+    return {
+      username: user.username,
+      displayName: user.display_name || user.username,
+      role: user.role || "crew",
+    };
+  } catch (error) {
+    if (isUserSetupMissing(error)) {
+      alert("Cloud users are not set up yet. Temporary login allowed for now.");
+      return {
+        username,
+        displayName: username,
+        role: requiredArea === "pos" ? "crew" : "admin",
+      };
+    }
+
+    alert(`Login failed.\n${error.message}`);
+    return null;
+  }
+}
+
+function isUserSetupMissing(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("verify_app_user") || message.includes("schema cache") || message.includes("function");
 }
 
 async function supabaseRequest(path, options = {}) {
@@ -2229,6 +2279,8 @@ function createEmptyPosSession() {
     active: false,
     shiftStarted: false,
     transactionActive: false,
+    crewUsername: "",
+    crewRole: "",
     startedAt: "",
     cart: [],
     sales: [],

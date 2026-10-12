@@ -24,6 +24,30 @@ This creates the cloud tables for:
 - sales items
 - sync logs
 
+## Create Login Users
+
+After `supabase/schema.sql` is complete:
+
+1. Go to **SQL Editor** again.
+2. Open `supabase/user_auth.sql` from this project.
+3. Copy the full SQL script.
+4. Paste it into Supabase SQL Editor.
+5. Click **Run**.
+
+This creates the cloud user table and secure login function for:
+
+- main app login
+- POS crew login
+
+Starter test users:
+
+| Username | Password | Access |
+| --- | --- | --- |
+| `admin` | `Admin@12345` | App and POS |
+| `crew1` | `Crew@12345` | POS only |
+
+Change these passwords before real store use.
+
 ## Important Key Safety
 
 The app can use the Supabase **anon public** key.
