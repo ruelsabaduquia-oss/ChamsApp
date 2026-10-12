@@ -5,6 +5,7 @@ const AUDIT_HISTORY_KEY = "storecount_audit_history_v1";
 const APP_USER_KEY = "storecount_app_user_v1";
 const POS_SESSION_KEY = "storecount_pos_session_v1";
 const SYNC_STATE_KEY = "storecount_sync_state_v1";
+const POS_QUICK_BUTTONS_KEY = "storecount_pos_quick_buttons_v1";
 const SUPABASE_URL = "https://nzgdfygljemhapabbsnf.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56Z2RmeWdsamVtaGFwYWJic25mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3NzY2ODksImV4cCI6MjEwNzM1MjY4OX0.MRcXcfy3RFY93VwKDEUIBhQiwAOmireZo4-Kk-N617g";
@@ -15,6 +16,7 @@ let auditorName = loadAuditorName();
 let auditHistory = loadAuditHistory();
 let appUser = loadAppUser();
 let syncState = loadSyncState();
+let posQuickButtons = loadPosQuickButtons();
 let activeModule = appUser ? "home" : "login";
 let posSession = loadPosSession();
 let viewingSavedAuditId = "";
@@ -156,6 +158,10 @@ const elements = {
   posScanStatus: $("#posScanStatus"),
   posManualBarcodeForm: $("#posManualBarcodeForm"),
   posBarcodeInput: $("#posBarcodeInput"),
+  quickButtonCount: $("#quickButtonCount"),
+  quickButtonGrid: $("#quickButtonGrid"),
+  quickButtonSearchInput: $("#quickButtonSearchInput"),
+  quickButtonSearchResults: $("#quickButtonSearchResults"),
   posCompleteSaleButton: $("#posCompleteSaleButton"),
   posCheckVoidStatusButton: $("#posCheckVoidStatusButton"),
   posClearCartButton: $("#posClearCartButton"),
@@ -287,6 +293,7 @@ function bindEvents() {
     handlePosBarcode(elements.posBarcodeInput.value, "manual");
     elements.posBarcodeInput.value = "";
   });
+  elements.quickButtonSearchInput.addEventListener("input", renderQuickButtonSearchResults);
   elements.posCompleteSaleButton.addEventListener("click", handlePosTransactionButton);
   elements.posCheckVoidStatusButton.addEventListener("click", checkVoidRequestStatuses);
   elements.posClearCartButton.addEventListener("click", clearPosCart);
@@ -925,6 +932,7 @@ function renderPos() {
   elements.posScanButton.hidden = !posSession.transactionActive || posScanner.active;
   elements.posStopScanButton.hidden = !posScanner.active;
   showPosRecoveryNotice();
+  renderQuickButtons();
   renderPosCart();
   renderPosSummary();
 }
@@ -1093,6 +1101,115 @@ function handlePosBarcode(rawCode, source = "manual") {
     return;
   }
 
+  addPosItemByCode(item.code, source === "manual" ? "manual" : "camera");
+}
+
+function renderQuickButtons() {
+  elements.quickButtonCount.textContent = `${posQuickButtons.length.toLocaleString()} saved`;
+  elements.quickButtonGrid.innerHTML = "";
+
+  if (!posQuickButtons.length) {
+    elements.quickButtonGrid.innerHTML = `<div class="empty-state"><strong>No quick buttons</strong><p>Add products without barcode from Manage Quick Buttons.</p></div>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  posQuickButtons.forEach((button) => {
+    const item = inventory.find((sku) => sku.code === button.code);
+    const tile = document.createElement("button");
+    tile.className = "quick-sale-button";
+    tile.type = "button";
+    tile.innerHTML = `
+      <strong>${escapeHtml(button.label || item?.description || button.code)}</strong>
+      <span>${escapeHtml(button.code)} | ${formatMoney(item?.price ?? button.price ?? 0)}</span>
+    `;
+    tile.addEventListener("click", () => handleQuickButtonSale(button.code));
+    fragment.appendChild(tile);
+  });
+  elements.quickButtonGrid.appendChild(fragment);
+}
+
+function renderQuickButtonSearchResults() {
+  const query = elements.quickButtonSearchInput.value.trim().toLowerCase();
+  elements.quickButtonSearchResults.innerHTML = "";
+
+  if (!query) {
+    elements.quickButtonSearchResults.innerHTML = `<div class="empty-state"><strong>Search item</strong><p>Type SKU or description to add a quick button.</p></div>`;
+    return;
+  }
+
+  const matches = inventory
+    .filter((item) => {
+      const alreadyAdded = posQuickButtons.some((button) => button.code === item.code);
+      return (
+        !alreadyAdded &&
+        (!normalizeBarcode(item.barcode) || String(item.barcode || "").trim() === "") &&
+        (item.code.toLowerCase().includes(query) || item.description.toLowerCase().includes(query))
+      );
+    })
+    .slice(0, 12);
+
+  if (!matches.length) {
+    elements.quickButtonSearchResults.innerHTML = `<div class="empty-state"><strong>No item found</strong><p>Try another SKU or item description.</p></div>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  matches.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "quick-search-row";
+    row.innerHTML = `
+      <div>
+        <strong>${escapeHtml(item.description)}</strong>
+        <small>${escapeHtml(item.code)} | ${formatMoney(item.price || 0)}</small>
+      </div>
+      <button class="secondary-button" type="button">Add</button>
+    `;
+    row.querySelector("button").addEventListener("click", () => addQuickButton(item.code));
+    fragment.appendChild(row);
+  });
+  elements.quickButtonSearchResults.appendChild(fragment);
+}
+
+function addQuickButton(code) {
+  const item = inventory.find((sku) => sku.code === code);
+  if (!item) return;
+
+  posQuickButtons.push({
+    code: item.code,
+    label: item.description,
+    price: sanitizeMoney(item.price),
+    createdAt: new Date().toISOString(),
+  });
+  savePosQuickButtons();
+  elements.quickButtonSearchInput.value = "";
+  renderQuickButtons();
+  renderQuickButtonSearchResults();
+}
+
+function handleQuickButtonSale(code) {
+  if (!posSession.active) {
+    elements.posScanStatus.textContent = "OPEN POS FIRST";
+    alert("Open POS first.");
+    return;
+  }
+
+  if (!posSession.transactionActive) {
+    elements.posScanStatus.textContent = "START TRANSACTION";
+    alert("Tap Start Transaction before adding quick button items.");
+    return;
+  }
+
+  addPosItemByCode(code, "quick");
+}
+
+function addPosItemByCode(code, source = "quick") {
+  const item = inventory.find((sku) => sku.code === code);
+  if (!item) {
+    alert("Quick button item was not found in product list.");
+    return;
+  }
+
   const price = ensurePosPrice(item);
   if (price === null) {
     elements.posScanStatus.textContent = "PRICE REQUIRED";
@@ -1114,7 +1231,8 @@ function handlePosBarcode(rawCode, source = "manual") {
 
   savePosSession();
   renderPosCart();
-  elements.posScanStatus.textContent = source === "manual" ? `TYPED ${item.code}` : `ADDED ${item.code}`;
+  elements.posScanStatus.textContent =
+    source === "quick" ? `QUICK ${item.code}` : source === "manual" ? `TYPED ${item.code}` : `ADDED ${item.code}`;
   triggerHaptic();
   playScanBeep();
 }
@@ -2646,6 +2764,18 @@ function loadPosSession() {
     return { ...createEmptyPosSession(), ...(JSON.parse(localStorage.getItem(POS_SESSION_KEY)) || {}) };
   } catch {
     return createEmptyPosSession();
+  }
+}
+
+function savePosQuickButtons() {
+  localStorage.setItem(POS_QUICK_BUTTONS_KEY, JSON.stringify(posQuickButtons));
+}
+
+function loadPosQuickButtons() {
+  try {
+    return JSON.parse(localStorage.getItem(POS_QUICK_BUTTONS_KEY)) || [];
+  } catch {
+    return [];
   }
 }
 

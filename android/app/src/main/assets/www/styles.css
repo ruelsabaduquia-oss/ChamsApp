@@ -1726,6 +1726,84 @@ button:disabled {
   padding: 12px;
 }
 
+.quick-sale-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+}
+
+.quick-button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quick-sale-button {
+  display: grid;
+  gap: 4px;
+  min-height: 72px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #eff6ff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.quick-sale-button strong {
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.quick-sale-button span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.quick-button-manager {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.quick-button-manager summary {
+  min-height: 44px;
+  color: var(--scan);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.quick-search-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.quick-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.quick-search-row strong,
+.quick-search-row small {
+  display: block;
+}
+
+.quick-search-row small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .pos-cart-rows {
   display: grid;
   gap: 8px;
