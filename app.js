@@ -132,6 +132,8 @@ const elements = {
   posCrewLoginForm: $("#posCrewLoginForm"),
   posCrewUsernameInput: $("#posCrewUsernameInput"),
   posCrewPasswordInput: $("#posCrewPasswordInput"),
+  posStartShiftButton: $("#posStartShiftButton"),
+  posChangeFundCard: $("#posChangeFundCard"),
   posFloatForm: $("#posFloatForm"),
   posFloatInput: $("#posFloatInput"),
   posFloatDisplay: $("#posFloatDisplay"),
@@ -256,6 +258,7 @@ function bindEvents() {
     elements.barcodeInput.value = "";
   });
   elements.posCrewLoginForm.addEventListener("submit", handlePosCrewLogin);
+  elements.posStartShiftButton.addEventListener("click", startPosShift);
   elements.posFloatForm.addEventListener("submit", handlePosFloat);
   elements.posScanButton.addEventListener("click", startPosScanner);
   elements.posStopScanButton.addEventListener("click", stopPosScanner);
@@ -808,12 +811,26 @@ function handlePosCrewLogin(event) {
   posSession.startedAt = new Date().toISOString();
   posSession.float = 0;
   posSession.active = false;
+  posSession.shiftStarted = false;
   posSession.transactionActive = false;
   posSession.cart = [];
   posSession.sales = posSession.sales || [];
   savePosSession();
   elements.posCrewLoginForm.reset();
   renderPos();
+}
+
+function startPosShift() {
+  if (!posSession.crew) {
+    alert("Login crew first.");
+    return;
+  }
+
+  posSession.shiftStarted = true;
+  posSession.startedAt = new Date().toISOString();
+  savePosSession();
+  renderPos();
+  elements.posFloatInput.focus();
 }
 
 function handlePosFloat(event) {
@@ -827,6 +844,7 @@ function handlePosFloat(event) {
 
   posSession.float = floatAmount;
   posSession.active = true;
+  posSession.shiftStarted = true;
   posSession.transactionActive = false;
   posSession.startedAt = posSession.startedAt || new Date().toISOString();
   savePosSession();
@@ -837,8 +855,10 @@ function handlePosFloat(event) {
 function renderPos() {
   const hasCrew = Boolean(posSession.crew);
   const hasActiveRegister = hasCrew && posSession.active;
+  const needsChangeFund = hasCrew && posSession.shiftStarted && !hasActiveRegister;
   elements.posCrewCard.hidden = hasCrew;
-  elements.posFloatCard.hidden = !hasCrew || hasActiveRegister;
+  elements.posFloatCard.hidden = !hasCrew || posSession.shiftStarted || hasActiveRegister;
+  elements.posChangeFundCard.hidden = !needsChangeFund;
   elements.posRegister.hidden = !hasActiveRegister;
   elements.posCrewLabel.textContent = hasCrew ? `Crew: ${posSession.crew}` : "Crew not signed in";
   elements.posStatusBadge.textContent = hasActiveRegister ? "Open" : "Closed";
@@ -1937,6 +1957,7 @@ function createEmptyPosSession() {
     crew: "",
     float: 0,
     active: false,
+    shiftStarted: false,
     transactionActive: false,
     startedAt: "",
     cart: [],
