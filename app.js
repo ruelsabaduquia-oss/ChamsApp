@@ -263,7 +263,7 @@ function bindEvents() {
     handlePosBarcode(elements.posBarcodeInput.value, "manual");
     elements.posBarcodeInput.value = "";
   });
-  elements.posCompleteSaleButton.addEventListener("click", completePosSale);
+  elements.posCompleteSaleButton.addEventListener("click", handlePosTransactionButton);
   elements.posClearCartButton.addEventListener("click", clearPosCart);
   elements.posXReadingButton.addEventListener("click", () => renderPosReading("X"));
   elements.posYReadingButton.addEventListener("click", closePosShift);
@@ -807,6 +807,7 @@ function handlePosCrewLogin(event) {
   posSession.startedAt = new Date().toISOString();
   posSession.float = 0;
   posSession.active = false;
+  posSession.transactionActive = false;
   posSession.cart = [];
   posSession.sales = posSession.sales || [];
   savePosSession();
@@ -821,6 +822,7 @@ function handlePosFloat(event) {
 
   posSession.float = floatAmount;
   posSession.active = true;
+  posSession.transactionActive = false;
   posSession.startedAt = posSession.startedAt || new Date().toISOString();
   savePosSession();
   elements.posFloatForm.reset();
@@ -835,6 +837,9 @@ function renderPos() {
   elements.posRegister.hidden = !hasActiveRegister;
   elements.posCrewLabel.textContent = hasCrew ? `Crew: ${posSession.crew}` : "Crew not signed in";
   elements.posStatusBadge.textContent = hasActiveRegister ? "Open" : "Closed";
+  elements.posCompleteSaleButton.textContent = posSession.transactionActive ? "Cash Out" : "Start Transaction";
+  elements.posScanButton.hidden = !posSession.transactionActive || posScanner.active;
+  elements.posStopScanButton.hidden = !posScanner.active;
   renderPosCart();
   renderPosSummary();
 }
@@ -851,6 +856,12 @@ function renderPosSummary() {
 
 function renderPosCart() {
   elements.posCartRows.innerHTML = "";
+  if (!posSession.transactionActive) {
+    elements.posCartRows.innerHTML = `<div class="empty-state"><strong>Ready for next customer</strong><p>Tap Start Transaction to open the scanner.</p></div>`;
+    renderPosSummary();
+    return;
+  }
+
   if (!posSession.cart.length) {
     elements.posCartRows.innerHTML = `<div class="empty-state"><strong>No items</strong><p>Scan or type an item barcode.</p></div>`;
     renderPosSummary();
@@ -889,6 +900,11 @@ function renderPosCart() {
 async function startPosScanner() {
   if (!posSession.active) {
     elements.posScanStatus.textContent = "OPEN POS FIRST";
+    return;
+  }
+
+  if (!posSession.transactionActive) {
+    elements.posScanStatus.textContent = "START TRANSACTION";
     return;
   }
 
@@ -967,6 +983,12 @@ function handlePosBarcode(rawCode, source = "manual") {
     return;
   }
 
+  if (!posSession.transactionActive) {
+    elements.posScanStatus.textContent = "START TRANSACTION";
+    alert("Tap Start Transaction before scanning items.");
+    return;
+  }
+
   const cleanCode = normalizeBarcode(rawCode);
   if (!cleanCode) return;
 
@@ -1037,14 +1059,43 @@ function voidPosLine(code) {
 }
 
 function clearPosCart() {
-  if (!posSession.cart.length) return;
+  if (!posSession.transactionActive && !posSession.cart.length) return;
   if (!confirm("Void entire current transaction?")) return;
   posSession.cart = [];
+  posSession.transactionActive = false;
   savePosSession();
-  renderPosCart();
+  stopPosScanner();
+  renderPos();
+}
+
+function handlePosTransactionButton() {
+  if (posSession.transactionActive) {
+    completePosSale();
+    return;
+  }
+
+  startPosTransaction();
+}
+
+function startPosTransaction() {
+  if (!posSession.active) {
+    alert("Open POS and enter change fund first.");
+    return;
+  }
+
+  posSession.cart = [];
+  posSession.transactionActive = true;
+  savePosSession();
+  renderPos();
+  startPosScanner();
 }
 
 function completePosSale() {
+  if (!posSession.transactionActive) {
+    startPosTransaction();
+    return;
+  }
+
   if (!posSession.cart.length) {
     alert("No items in transaction.");
     return;
@@ -1064,7 +1115,9 @@ function completePosSale() {
   };
   posSession.sales.unshift(sale);
   posSession.cart = [];
+  posSession.transactionActive = false;
   savePosSession();
+  stopPosScanner();
   renderPos();
   if (payment.method === "cash") {
     alert(`Cash out completed.\nTotal: ${formatMoney(total)}\nCash: ${formatMoney(payment.amountTendered)}\nChange: ${formatMoney(payment.change)}`);
@@ -1866,6 +1919,7 @@ function createEmptyPosSession() {
     crew: "",
     float: 0,
     active: false,
+    transactionActive: false,
     startedAt: "",
     cart: [],
     sales: [],
