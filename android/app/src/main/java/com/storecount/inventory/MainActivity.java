@@ -67,6 +67,16 @@ public class MainActivity extends Activity {
 
                 MainActivity.this.filePathCallback = filePathCallback;
                 Intent intent = fileChooserParams.createIntent();
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+                    "text/csv",
+                    "text/comma-separated-values",
+                    "application/csv",
+                    "application/vnd.ms-excel",
+                    "application/octet-stream",
+                    "text/plain"
+                });
                 try {
                     startActivityForResult(intent, FILE_CHOOSER_REQUEST);
                 } catch (Exception error) {
