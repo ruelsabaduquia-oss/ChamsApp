@@ -1046,22 +1046,77 @@ function completePosSale() {
   }
 
   const total = getPosCartTotal();
+  const payment = collectPosPayment(total);
+  if (!payment) return;
+
   const sale = {
     id: `${new Date().toISOString()}-${Math.random().toString(36).slice(2, 8)}`,
     crew: posSession.crew,
     createdAt: new Date().toISOString(),
     total,
+    payment,
     items: posSession.cart.map((line) => ({ ...line })),
   };
   posSession.sales.unshift(sale);
   posSession.cart = [];
   savePosSession();
   renderPos();
-  alert(`Sale completed: ${formatMoney(total)}`);
+  if (payment.method === "cash") {
+    alert(`Cash out completed.\nTotal: ${formatMoney(total)}\nCash: ${formatMoney(payment.amountTendered)}\nChange: ${formatMoney(payment.change)}`);
+  } else {
+    alert(`GCash payment recorded.\nTotal: ${formatMoney(total)}\nReference: ${payment.reference}`);
+  }
+}
+
+function collectPosPayment(total) {
+  const methodInput = prompt(`Payment method for ${formatMoney(total)}\n\nType CASH or GCASH`, "cash");
+  if (methodInput === null) return null;
+
+  const method = methodInput.trim().toLowerCase();
+  if (method === "cash") {
+    const tenderedInput = prompt(`Total purchase: ${formatMoney(total)}\nEnter cash given by customer`, formatMoney(total));
+    if (tenderedInput === null) return null;
+    const amountTendered = sanitizeMoney(tenderedInput);
+    if (amountTendered < total) {
+      alert("Cash amount is less than total purchase.");
+      return null;
+    }
+
+    return {
+      method: "cash",
+      amountPaid: total,
+      amountTendered,
+      change: sanitizeMoney(amountTendered - total),
+      reference: "",
+    };
+  }
+
+  if (method === "gcash" || method === "g-cash") {
+    const reference = prompt(`GCash exact payment: ${formatMoney(total)}\nEnter GCash reference number`, "");
+    if (reference === null) return null;
+    const cleanReference = reference.trim();
+    if (!cleanReference) {
+      alert("GCash reference number is required.");
+      return null;
+    }
+
+    return {
+      method: "gcash",
+      amountPaid: total,
+      amountTendered: total,
+      change: 0,
+      reference: cleanReference,
+    };
+  }
+
+  alert("Payment method must be CASH or GCASH.");
+  return null;
 }
 
 function renderPosReading(type) {
   const salesTotal = getPosSalesTotal();
+  const cashTotal = getPosPaymentTotal("cash");
+  const gcashTotal = getPosPaymentTotal("gcash");
   const transactionCount = posSession.sales.length;
   const itemCount = posSession.sales.reduce((sum, sale) => sum + sale.items.reduce((lineSum, item) => lineSum + Number(item.qty || 0), 0), 0);
   elements.posReadingLabel.textContent = `${type} Reading`;
@@ -1072,6 +1127,8 @@ function renderPosReading(type) {
     <span>Float: ${formatMoney(posSession.float || 0)}</span>
     <span>Transactions: ${transactionCount.toLocaleString()} | Items: ${itemCount.toLocaleString()}</span>
     <span>Gross Sales: ${formatMoney(salesTotal)}</span>
+    <span>Cash Sales: ${formatMoney(cashTotal)}</span>
+    <span>GCash Sales: ${formatMoney(gcashTotal)}</span>
   `;
 }
 
@@ -1096,6 +1153,12 @@ function getPosCartQty() {
 
 function getPosSalesTotal() {
   return posSession.sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+}
+
+function getPosPaymentTotal(method) {
+  return posSession.sales
+    .filter((sale) => sale.payment?.method === method)
+    .reduce((sum, sale) => sum + Number(sale.payment?.amountPaid || sale.total || 0), 0);
 }
 
 function triggerHaptic() {
