@@ -80,7 +80,7 @@ create table if not exists public.sync_logs (
 
 create table if not exists public.pos_quick_buttons (
   id uuid primary key default gen_random_uuid(),
-  sku_code text not null unique references public.products(sku_code) on update cascade,
+  sku_code text not null unique,
   label text,
   price numeric(12, 2) not null default 0,
   sort_order integer not null default 0,
@@ -89,6 +89,9 @@ create table if not exists public.pos_quick_buttons (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.pos_quick_buttons
+  drop constraint if exists pos_quick_buttons_sku_code_fkey;
 
 create index if not exists products_barcode_idx on public.products (barcode);
 create index if not exists products_updated_at_idx on public.products (updated_at);

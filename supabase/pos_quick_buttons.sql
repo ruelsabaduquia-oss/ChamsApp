@@ -5,7 +5,7 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.pos_quick_buttons (
   id uuid primary key default gen_random_uuid(),
-  sku_code text not null unique references public.products(sku_code) on update cascade,
+  sku_code text not null unique,
   label text,
   price numeric(12, 2) not null default 0,
   sort_order integer not null default 0,
@@ -14,6 +14,9 @@ create table if not exists public.pos_quick_buttons (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.pos_quick_buttons
+  drop constraint if exists pos_quick_buttons_sku_code_fkey;
 
 create index if not exists pos_quick_buttons_active_idx
   on public.pos_quick_buttons (is_active, sort_order, sku_code);

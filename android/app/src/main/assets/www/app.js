@@ -2645,10 +2645,15 @@ async function syncAdminQuickButtons(options = {}) {
   elements.adminSyncQuickButtonsButton.disabled = true;
 
   try {
-    await uploadLocalQuickButtonsToCloud();
+    const uploadResult = await uploadLocalQuickButtonsToCloud();
     const result = await downloadQuickButtonsFromCloud({ silent: true });
     elements.adminQuickButtonCount.textContent = `${posQuickButtons.length.toLocaleString()} saved`;
-    if (notify) alert(`Quick buttons synced.\n${result.updated.toLocaleString()} button(s) loaded from cloud.`);
+    if (notify) {
+      const failedText = uploadResult.failed.length
+        ? `\n\nUpload warning: ${uploadResult.failed.length.toLocaleString()} button(s) could not be saved to cloud:\n${uploadResult.failed.map((item) => `- ${item.code}: ${item.message}`).join("\n")}`
+        : "";
+      alert(`Quick buttons synced.\n${result.updated.toLocaleString()} button(s) loaded from cloud.${failedText}`);
+    }
   } catch (error) {
     elements.adminQuickButtonCount.textContent = originalLabel || `${posQuickButtons.length.toLocaleString()} saved`;
     if (notify) alert(`Quick button sync failed.\n${error.message}`);
@@ -2688,7 +2693,7 @@ async function uploadSalesToCloud(options = {}) {
 }
 
 async function syncQuickButtonToCloud(button) {
-  if (!button) return;
+  if (!button) return { ok: false, code: "", message: "Missing quick button" };
   try {
     await supabaseRequest("/rest/v1/pos_quick_buttons?on_conflict=sku_code", {
       method: "POST",
@@ -2705,17 +2710,22 @@ async function syncQuickButtonToCloud(button) {
         updated_at: new Date().toISOString(),
       }),
     });
+    return { ok: true, code: button.code, message: "" };
   } catch (error) {
-    if (isQuickButtonCloudMissing(error)) return;
-    alert(`Quick button saved on this phone but not synced to cloud.\n${error.message}`);
+    return { ok: false, code: button.code, message: error.message || "Cloud sync failed" };
   }
 }
 
 async function uploadLocalQuickButtonsToCloud() {
-  if (!isAdminUser() || !posQuickButtons.length) return;
+  const failed = [];
+  if (!isAdminUser() || !posQuickButtons.length) return { uploaded: 0, failed };
+  let uploaded = 0;
   for (const button of posQuickButtons) {
-    await syncQuickButtonToCloud(button);
+    const result = await syncQuickButtonToCloud(button);
+    if (result.ok) uploaded += 1;
+    else if (!isQuickButtonCloudMissing({ message: result.message })) failed.push(result);
   }
+  return { uploaded, failed };
 }
 
 async function removeQuickButtonFromCloud(button) {
