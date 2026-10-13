@@ -1068,6 +1068,9 @@ function handlePosFloat(event) {
   posSession.shiftStarted = true;
   posSession.transactionActive = false;
   posSession.startedAt = posSession.startedAt || new Date().toISOString();
+  posSession.ejFileName = posSession.ejFileName || buildElectronicJournalFilename("SHIFT");
+  posSession.ejEntries = [];
+  appendElectronicJournalEntry("OPENING_FUND", buildOpeningFundText(floatAmount), { save: false });
   savePosSession();
   elements.posFloatForm.reset();
   renderPos();
@@ -1655,6 +1658,7 @@ async function voidPosLine(code) {
   if (canApproveVoid(posSession.crewRole)) {
     if (!confirm("Void this item from the current transaction?")) return;
     await logApprovedVoid(line, "Direct void by authorized POS user.");
+    appendElectronicJournalEntry("VOID_ITEM", buildVoidEntryText(line, "Direct void by authorized POS user.", "APPROVED"));
     removePosLine(code);
     return;
   }
@@ -1676,6 +1680,7 @@ async function voidPosLine(code) {
       status: "pending",
       requestedAt: request.requested_at,
     });
+    appendElectronicJournalEntry("VOID_REQUEST", buildVoidEntryText(line, cleanReason, "PENDING"), { save: false });
     savePosSession();
     renderPosCart();
     alert("Void request sent. Supervisor must approve before this item is removed.");
@@ -1697,6 +1702,7 @@ function clearPosCart() {
     return;
   }
   if (!confirm("Void entire current transaction?")) return;
+  appendElectronicJournalEntry("VOID_TRANSACTION", buildVoidTransactionText(posSession.cart, "Entire transaction voided."));
   posSession.cart = [];
   posSession.transactionActive = false;
   savePosSession();
@@ -1765,6 +1771,7 @@ async function completePosSale() {
     items: posSession.cart.map((line) => ({ ...line })),
   };
   posSession.sales.unshift(sale);
+  appendElectronicJournalEntry("SALES_INVOICE", buildSalesInvoiceText(sale), { save: false });
   deductInventoryStock(sale.items);
   posSession.cart = [];
   posSession.transactionActive = false;
@@ -1946,6 +1953,7 @@ function closePosShift() {
   renderPosReading("Y");
   if (!confirm("Y Reading will close the current POS shift. Continue?")) return;
   if (posSession.cart.length && !confirm("There is an active transaction. Close and void it?")) return;
+  appendElectronicJournalEntry("Y_READING", buildPosReadingText("Y"), { save: false });
   downloadShiftElectronicJournal("Y");
   posSession = createEmptyPosSession();
   savePosSession();
@@ -1954,20 +1962,98 @@ function closePosShift() {
 }
 
 function downloadShiftElectronicJournal(readingType = "X") {
-  if (!posSession.sales.length) {
-    alert("No completed POS sales in this shift yet.");
+  if (!getElectronicJournalEntries().length) {
+    alert("No Electronic Journal entries in this shift yet.");
     return;
   }
 
   const ejText = buildElectronicJournalText(readingType);
   const blob = new Blob([ejText], { type: "text/plain;charset=utf-8" });
-  saveBlob(blob, buildElectronicJournalFilename(readingType));
+  saveBlob(blob, posSession.ejFileName || buildElectronicJournalFilename(readingType));
 }
 
-function buildElectronicJournalText(readingType = "X") {
-  const receipts = [...posSession.sales].reverse().map((sale) => buildSalesInvoiceText(sale));
-  receipts.push(buildPosReadingText(readingType));
-  return `${receipts.join("\n\n")}\n`;
+function buildElectronicJournalText(readingType = "X", options = {}) {
+  const entries = getElectronicJournalEntries().map((entry) => entry.text);
+  if (!options.omitReading && !getElectronicJournalEntries().some((entry) => entry.type === `${readingType}_READING`)) {
+    entries.push(buildPosReadingText(readingType));
+  }
+  return `${entries.join("\n\n")}\n`;
+}
+
+function getElectronicJournalEntries() {
+  if (Array.isArray(posSession.ejEntries) && posSession.ejEntries.length) return posSession.ejEntries;
+  return [...(posSession.sales || [])].reverse().map((sale) => ({
+    type: "SALES_INVOICE",
+    createdAt: sale.createdAt || new Date().toISOString(),
+    text: buildSalesInvoiceText(sale),
+  }));
+}
+
+function appendElectronicJournalEntry(type, text, options = {}) {
+  posSession.ejEntries = Array.isArray(posSession.ejEntries) ? posSession.ejEntries : [];
+  posSession.ejEntries.push({
+    type,
+    createdAt: new Date().toISOString(),
+    text,
+  });
+  if (options.save !== false) savePosSession();
+}
+
+function buildOpeningFundText(floatAmount) {
+  return [
+    ...buildReceiptHeader(),
+    ejLine(),
+    ejCenter("OPENING CHANGE FUND"),
+    "",
+    ejColumns("Crew:", posSession.crew || "Not set", 14, 26),
+    ejColumns("Started:", posSession.startedAt ? formatReceiptDate(posSession.startedAt) : formatReceiptDate(new Date().toISOString()), 14, 26),
+    ejColumns("POS #", POS_RECEIPT_PROFILE.posNo, 14, 26),
+    ejLine(),
+    ejColumns("Change Fund", formatMoney(floatAmount || 0), 26, 14),
+    ejLine(),
+  ].map((line) => ejFit(line)).join("\n");
+}
+
+function buildVoidEntryText(line, reason, status) {
+  const amount = sanitizeMoney(Number(line.qty || 0) * Number(line.price || 0));
+  return [
+    ...buildReceiptHeader(),
+    ejLine(),
+    ejCenter("V O I D   I T E M"),
+    "",
+    ejColumns("Status:", status || "VOID", 14, 26),
+    ejColumns("Date:", formatReceiptDate(new Date().toISOString()), 14, 26),
+    ejColumns("Crew:", posSession.crew || "Not set", 14, 26),
+    ejColumns("Trans:", posSession.currentTransactionId || "Current", 14, 26),
+    ejLine(),
+    ejLeft(shortenText(line.description || line.code, EJ_WIDTH)),
+    ejColumns(`   ${formatQty(line.qty || 0)} pc @ ${formatMoney(line.price || 0)}`, formatMoney(amount), 25, 15),
+    ejLine(),
+    ejLeft(`Reason: ${shortenText(reason || "", 32)}`),
+    ejLine(),
+  ].map((entryLine) => ejFit(entryLine)).join("\n");
+}
+
+function buildVoidTransactionText(lines, reason) {
+  const total = (lines || []).reduce((sum, line) => sum + Number(line.qty || 0) * Number(line.price || 0), 0);
+  const output = [
+    ...buildReceiptHeader(),
+    ejLine(),
+    ejCenter("VOID TRANSACTION"),
+    "",
+    ejColumns("Date:", formatReceiptDate(new Date().toISOString()), 14, 26),
+    ejColumns("Crew:", posSession.crew || "Not set", 14, 26),
+    ejColumns("Trans:", posSession.currentTransactionId || "Current", 14, 26),
+    ejLine(),
+  ];
+
+  (lines || []).forEach((line) => {
+    output.push(ejLeft(shortenText(line.description || line.code, EJ_WIDTH)));
+    output.push(ejColumns(`   ${formatQty(line.qty || 0)} pc @ ${formatMoney(line.price || 0)}`, formatMoney(Number(line.qty || 0) * Number(line.price || 0)), 25, 15));
+  });
+
+  output.push(ejLine(), ejColumns("Void Total", formatMoney(total), 26, 14), ejLeft(`Reason: ${shortenText(reason || "", 32)}`), ejLine());
+  return output.map((line) => ejFit(line)).join("\n");
 }
 
 function buildSalesInvoiceText(sale) {
@@ -2215,6 +2301,10 @@ async function checkVoidRequestStatuses() {
       if (!localRequest) return;
 
       if (row.status === "approved") {
+        const line = posSession.cart.find((item) => item.code === row.item_code);
+        if (line) {
+          appendElectronicJournalEntry("VOID_ITEM", buildVoidEntryText(line, row.decision_note || "Supervisor approved void.", "APPROVED"), { save: false });
+        }
         removePosLine(row.item_code);
         localRequest.status = "applied";
         approved += 1;
@@ -3503,6 +3593,8 @@ function createEmptyPosSession() {
     cart: [],
     sales: [],
     voidRequests: [],
+    ejFileName: "",
+    ejEntries: [],
   };
 }
 
