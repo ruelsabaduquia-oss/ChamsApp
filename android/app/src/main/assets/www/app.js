@@ -7,6 +7,7 @@ const POS_SESSION_KEY = "storecount_pos_session_v1";
 const SYNC_STATE_KEY = "storecount_sync_state_v1";
 const POS_QUICK_BUTTONS_KEY = "storecount_pos_quick_buttons_v1";
 const POS_RECEIPT_COUNTER_KEY = "storecount_pos_receipt_counter_v1";
+const POS_EJ_ARCHIVE_KEY = "storecount_pos_ej_archive_v1";
 const EJ_WIDTH = 40;
 const POS_RECEIPT_PROFILE = {
   storeName: "CHAM'S CONVENIENCE STORE",
@@ -42,6 +43,7 @@ let auditHistory = loadAuditHistory();
 let appUser = loadAppUser();
 let syncState = loadSyncState();
 let posQuickButtons = loadPosQuickButtons();
+let posEJournalArchive = loadPosEJournalArchive();
 let activeModule = appUser ? "home" : "login";
 let posSession = loadPosSession();
 let viewingSavedAuditId = "";
@@ -193,6 +195,9 @@ const elements = {
   quickButtonGrid: $("#quickButtonGrid"),
   adminQuickButtonCount: $("#adminQuickButtonCount"),
   adminQuickButtonGrid: $("#adminQuickButtonGrid"),
+  adminEJournalCount: $("#adminEJournalCount"),
+  adminEJournalSelect: $("#adminEJournalSelect"),
+  downloadAdminEJournalButton: $("#downloadAdminEJournalButton"),
   quickButtonSearchInput: $("#quickButtonSearchInput"),
   quickButtonSearchResults: $("#quickButtonSearchResults"),
   posCompleteSaleButton: $("#posCompleteSaleButton"),
@@ -341,6 +346,7 @@ function bindEvents() {
   elements.posXReadingButton.addEventListener("click", () => renderPosReading("X"));
   elements.posEJournalButton.addEventListener("click", () => downloadShiftElectronicJournal("X"));
   elements.posYReadingButton.addEventListener("click", closePosShift);
+  elements.downloadAdminEJournalButton.addEventListener("click", downloadSelectedArchivedEJournal);
   elements.syncAllButton.addEventListener("click", syncAll);
   elements.downloadProductsButton.addEventListener("click", downloadProductsFromCloud);
   elements.uploadSalesButton.addEventListener("click", uploadSalesToCloud);
@@ -508,6 +514,7 @@ function showAdminSetup() {
   renderQuickButtons();
   renderAdminQuickButtons();
   renderQuickButtonSearchResults();
+  renderAdminEJournalList();
   uploadLocalQuickButtonsToCloud();
 }
 
@@ -1088,6 +1095,7 @@ function renderPos() {
   elements.posStatusBadge.textContent = hasActiveRegister ? "Open" : "Closed";
   elements.posCompleteSaleButton.textContent = posSession.transactionActive ? "Cash Out" : "Start Transaction";
   elements.posCheckVoidStatusButton.hidden = !posSession.transactionActive || !(posSession.voidRequests || []).some((request) => request.status === "pending");
+  elements.posEJournalButton.hidden = !isAdminUser();
   elements.posScanButton.hidden = !posSession.transactionActive || posScanner.active;
   elements.posStopScanButton.hidden = !posScanner.active;
   showPosRecoveryNotice();
@@ -1954,7 +1962,7 @@ function closePosShift() {
   if (!confirm("Y Reading will close the current POS shift. Continue?")) return;
   if (posSession.cart.length && !confirm("There is an active transaction. Close and void it?")) return;
   appendElectronicJournalEntry("Y_READING", buildPosReadingText("Y"), { save: false });
-  downloadShiftElectronicJournal("Y");
+  archiveCurrentElectronicJournal("Y");
   posSession = createEmptyPosSession();
   savePosSession();
   stopPosScanner();
@@ -1962,6 +1970,11 @@ function closePosShift() {
 }
 
 function downloadShiftElectronicJournal(readingType = "X") {
+  if (!isAdminUser()) {
+    alert("Only Administrator can access the Electronic Journal.");
+    return;
+  }
+
   if (!getElectronicJournalEntries().length) {
     alert("No Electronic Journal entries in this shift yet.");
     return;
@@ -1970,6 +1983,71 @@ function downloadShiftElectronicJournal(readingType = "X") {
   const ejText = buildElectronicJournalText(readingType);
   const blob = new Blob([ejText], { type: "text/plain;charset=utf-8" });
   saveBlob(blob, posSession.ejFileName || buildElectronicJournalFilename(readingType));
+}
+
+function archiveCurrentElectronicJournal(readingType = "Y") {
+  const entries = getElectronicJournalEntries();
+  if (!entries.length) return;
+
+  const closedAt = new Date().toISOString();
+  const text = buildElectronicJournalText(readingType, { omitReading: true });
+  const record = {
+    id: createDeviceId("ej"),
+    fileName: posSession.ejFileName || buildElectronicJournalFilename(readingType),
+    crew: posSession.crew || "",
+    crewUsername: posSession.crewUsername || "",
+    branch: branchName || appUser?.branchName || "",
+    posNo: POS_RECEIPT_PROFILE.posNo,
+    startedAt: posSession.startedAt || "",
+    closedAt,
+    entryCount: entries.length,
+    transactionCount: posSession.sales.length,
+    grossSales: getPosSalesTotal(),
+    text,
+  };
+
+  posEJournalArchive.unshift(record);
+  posEJournalArchive = posEJournalArchive.slice(0, 120);
+  savePosEJournalArchive();
+}
+
+function renderAdminEJournalList() {
+  if (!elements.adminEJournalSelect) return;
+  elements.adminEJournalCount.textContent = `${posEJournalArchive.length.toLocaleString()} files`;
+  elements.adminEJournalSelect.innerHTML = "";
+
+  if (!posEJournalArchive.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No completed shift EJ yet";
+    elements.adminEJournalSelect.appendChild(option);
+    elements.downloadAdminEJournalButton.disabled = true;
+    return;
+  }
+
+  posEJournalArchive.forEach((journal) => {
+    const option = document.createElement("option");
+    option.value = journal.id;
+    option.textContent = `${journal.fileName} | ${journal.crew || "Crew"} | ${formatAuditDate(journal.closedAt)}`;
+    elements.adminEJournalSelect.appendChild(option);
+  });
+  elements.downloadAdminEJournalButton.disabled = false;
+}
+
+function downloadSelectedArchivedEJournal() {
+  if (!isAdminUser()) {
+    alert("Only Administrator can download Electronic Journal files.");
+    return;
+  }
+
+  const selected = posEJournalArchive.find((journal) => journal.id === elements.adminEJournalSelect.value) || posEJournalArchive[0];
+  if (!selected) {
+    alert("No completed shift EJ found.");
+    return;
+  }
+
+  const blob = new Blob([selected.text], { type: "text/plain;charset=utf-8" });
+  saveBlob(blob, selected.fileName || buildElectronicJournalFilename("Y"));
 }
 
 function buildElectronicJournalText(readingType = "X", options = {}) {
@@ -3574,6 +3652,18 @@ function savePosQuickButtons() {
 function loadPosQuickButtons() {
   try {
     return JSON.parse(localStorage.getItem(POS_QUICK_BUTTONS_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
+
+function savePosEJournalArchive() {
+  localStorage.setItem(POS_EJ_ARCHIVE_KEY, JSON.stringify(posEJournalArchive));
+}
+
+function loadPosEJournalArchive() {
+  try {
+    return JSON.parse(localStorage.getItem(POS_EJ_ARCHIVE_KEY)) || [];
   } catch {
     return [];
   }
