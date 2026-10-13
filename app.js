@@ -2649,6 +2649,10 @@ async function syncAdminQuickButtons(options = {}) {
     const result = await downloadQuickButtonsFromCloud({ silent: true });
     elements.adminQuickButtonCount.textContent = `${posQuickButtons.length.toLocaleString()} saved`;
     if (notify) {
+      if (uploadResult.cloudMissing || result.skipped) {
+        alert("Quick buttons are saved on this device only.\n\nSupabase table public.pos_quick_buttons is not set up yet. Run supabase/pos_quick_buttons.sql in Supabase SQL Editor, then tap Sync Quick Buttons again.");
+        return;
+      }
       const failedText = uploadResult.failed.length
         ? `\n\nUpload warning: ${uploadResult.failed.length.toLocaleString()} button(s) could not be saved to cloud:\n${uploadResult.failed.map((item) => `- ${item.code}: ${item.message}`).join("\n")}`
         : "";
@@ -2718,14 +2722,16 @@ async function syncQuickButtonToCloud(button) {
 
 async function uploadLocalQuickButtonsToCloud() {
   const failed = [];
-  if (!isAdminUser() || !posQuickButtons.length) return { uploaded: 0, failed };
+  let cloudMissing = false;
+  if (!isAdminUser() || !posQuickButtons.length) return { uploaded: 0, failed, cloudMissing };
   let uploaded = 0;
   for (const button of posQuickButtons) {
     const result = await syncQuickButtonToCloud(button);
     if (result.ok) uploaded += 1;
-    else if (!isQuickButtonCloudMissing({ message: result.message })) failed.push(result);
+    else if (isQuickButtonCloudMissing({ message: result.message })) cloudMissing = true;
+    else failed.push(result);
   }
-  return { uploaded, failed };
+  return { uploaded, failed, cloudMissing };
 }
 
 async function removeQuickButtonFromCloud(button) {
