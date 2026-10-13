@@ -35,7 +35,7 @@ const POS_RECEIPT_PROFILE = {
 };
 const SUPABASE_URL = "https://nzgdfygljemhapabbsnf.supabase.co";
 const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56Z2RmeWdsamVtaGFwYWJic25mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3NzY2ODksImV4cCI6MjEwNzM1MjY4OX0.MRcXcfy3RFY93VwKDEUIBhQiwAOmireZo4-Kk-N617g";
+  "sb_publishable__aqcIKiTLJeuNr9dFCDUXg_-LeRw44M";
 
 let inventory = loadInventory();
 let branchName = loadBranchName();
