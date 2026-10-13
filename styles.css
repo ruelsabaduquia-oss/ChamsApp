@@ -1876,6 +1876,18 @@ button:disabled {
   font-weight: 800;
 }
 
+.device-setup-note,
+#posDeviceLabel {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+#posDeviceLabel {
+  display: block;
+  margin-top: 4px;
+}
+
 .admin-workflow-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

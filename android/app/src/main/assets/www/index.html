@@ -425,6 +425,7 @@
             <span>Point of Sale</span>
             <h2>POS Register</h2>
             <p id="posCrewLabel">Crew not signed in</p>
+            <small id="posDeviceLabel">Device setup required</small>
           </div>
           <strong id="posStatusBadge">Closed</strong>
         </div>
@@ -610,6 +611,29 @@
           </div>
           <strong id="adminStatusBadge">Admin</strong>
         </div>
+
+        <section class="quick-sale-panel">
+          <div class="section-heading">
+            <h2>Device Setup</h2>
+            <span id="deviceSetupStatus">Not configured</span>
+          </div>
+          <form id="deviceSetupForm">
+            <label>
+              <span>Branch Code</span>
+              <input id="deviceBranchCodeInput" type="text" autocomplete="off" placeholder="Example: 412" />
+            </label>
+            <label>
+              <span>Branch Name</span>
+              <input id="deviceBranchNameInput" type="text" autocomplete="organization" placeholder="Example: CHAMS Branch 412" />
+            </label>
+            <label>
+              <span>POS Terminal Number</span>
+              <input id="deviceTerminalNoInput" type="text" autocomplete="off" placeholder="Example: P033" />
+            </label>
+            <button class="primary-button" type="submit">Save Device Setup</button>
+            <p class="device-setup-note">This phone will use this branch and terminal number for POS sales, void requests, EJ files, and sync logs.</p>
+          </form>
+        </section>
 
         <section class="quick-sale-panel">
           <div class="section-heading">

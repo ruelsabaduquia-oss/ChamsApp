@@ -8,6 +8,7 @@ const SYNC_STATE_KEY = "storecount_sync_state_v1";
 const POS_QUICK_BUTTONS_KEY = "storecount_pos_quick_buttons_v1";
 const POS_RECEIPT_COUNTER_KEY = "storecount_pos_receipt_counter_v1";
 const POS_EJ_ARCHIVE_KEY = "storecount_pos_ej_archive_v1";
+const POS_DEVICE_SETUP_KEY = "storecount_pos_device_setup_v1";
 const EJ_WIDTH = 40;
 const POS_RECEIPT_PROFILE = {
   storeName: "CHAM'S CONVENIENCE STORE",
@@ -44,6 +45,7 @@ let appUser = loadAppUser();
 let syncState = loadSyncState();
 let posQuickButtons = loadPosQuickButtons();
 let posEJournalArchive = loadPosEJournalArchive();
+let posDeviceSetup = loadPosDeviceSetup();
 let activeModule = appUser ? "home" : "login";
 let posSession = loadPosSession();
 let viewingSavedAuditId = "";
@@ -170,6 +172,7 @@ const elements = {
   posRegister: $("#posRegister"),
   posCrewLabel: $("#posCrewLabel"),
   posStatusBadge: $("#posStatusBadge"),
+  posDeviceLabel: $("#posDeviceLabel"),
   posCrewLoginForm: $("#posCrewLoginForm"),
   posCrewUsernameInput: $("#posCrewUsernameInput"),
   posCrewPasswordInput: $("#posCrewPasswordInput"),
@@ -199,6 +202,11 @@ const elements = {
   adminEJournalCount: $("#adminEJournalCount"),
   adminEJournalSelect: $("#adminEJournalSelect"),
   downloadAdminEJournalButton: $("#downloadAdminEJournalButton"),
+  deviceSetupForm: $("#deviceSetupForm"),
+  deviceBranchCodeInput: $("#deviceBranchCodeInput"),
+  deviceBranchNameInput: $("#deviceBranchNameInput"),
+  deviceTerminalNoInput: $("#deviceTerminalNoInput"),
+  deviceSetupStatus: $("#deviceSetupStatus"),
   quickButtonSearchInput: $("#quickButtonSearchInput"),
   quickButtonSearchResults: $("#quickButtonSearchResults"),
   posCompleteSaleButton: $("#posCompleteSaleButton"),
@@ -227,6 +235,7 @@ document.addEventListener("DOMContentLoaded", init);
 function init() {
   elements.branchInput.value = branchName;
   elements.auditorInput.value = auditorName;
+  renderDeviceSetup();
   bindEvents();
   render();
   renderAppShell();
@@ -349,6 +358,7 @@ function bindEvents() {
   elements.posYReadingButton.addEventListener("click", closePosShift);
   elements.adminSyncQuickButtonsButton.addEventListener("click", () => syncAdminQuickButtons({ notify: true }));
   elements.downloadAdminEJournalButton.addEventListener("click", downloadSelectedArchivedEJournal);
+  elements.deviceSetupForm.addEventListener("submit", saveDeviceSetupFromForm);
   elements.syncAllButton.addEventListener("click", syncAll);
   elements.downloadProductsButton.addEventListener("click", downloadProductsFromCloud);
   elements.uploadSalesButton.addEventListener("click", uploadSalesToCloud);
@@ -513,6 +523,7 @@ function showAdminSetup() {
     panel.classList.toggle("is-active", key === "admin");
   });
   updateScreenTitle("Admin Setup");
+  renderDeviceSetup();
   renderQuickButtons();
   renderAdminQuickButtons();
   renderQuickButtonSearchResults();
@@ -645,6 +656,7 @@ function render() {
   renderSelectedSku();
   renderPos();
   renderSync();
+  renderDeviceSetup();
 }
 
 function canApproveVoid(role) {
@@ -653,6 +665,76 @@ function canApproveVoid(role) {
 
 function isAdminUser() {
   return String(appUser?.role || "").toLowerCase() === "admin";
+}
+
+function hasPosDeviceSetup() {
+  return Boolean((posDeviceSetup.branchCode || posDeviceSetup.branchName) && posDeviceSetup.terminalNo);
+}
+
+function getPosBranchName() {
+  return posDeviceSetup.branchName || posDeviceSetup.branchCode || branchName || appUser?.branchName || "";
+}
+
+function getPosBranchCode() {
+  return posDeviceSetup.branchCode || "";
+}
+
+function getPosTerminalNo() {
+  return posDeviceSetup.terminalNo || POS_RECEIPT_PROFILE.posNo;
+}
+
+function renderDeviceSetup() {
+  if (elements.deviceBranchCodeInput) elements.deviceBranchCodeInput.value = posDeviceSetup.branchCode || "";
+  if (elements.deviceBranchNameInput) elements.deviceBranchNameInput.value = posDeviceSetup.branchName || "";
+  if (elements.deviceTerminalNoInput) elements.deviceTerminalNoInput.value = posDeviceSetup.terminalNo || "";
+  if (elements.deviceSetupStatus) {
+    elements.deviceSetupStatus.textContent = hasPosDeviceSetup()
+      ? `${getPosBranchName()} | ${getPosTerminalNo()}`
+      : "Not configured";
+  }
+  if (elements.posDeviceLabel) {
+    elements.posDeviceLabel.textContent = hasPosDeviceSetup()
+      ? `Device: ${getPosBranchName()} | POS ${getPosTerminalNo()}`
+      : "Device setup required";
+  }
+}
+
+function saveDeviceSetupFromForm(event) {
+  event.preventDefault();
+  if (posSession.transactionActive && posSession.cart.length) {
+    alert("Finish Cash Out before changing this phone's branch or terminal setup.");
+    return;
+  }
+  if (posSession.active) {
+    alert("Close the current POS shift before changing this phone's branch or terminal setup.");
+    return;
+  }
+
+  const branchCode = elements.deviceBranchCodeInput.value.trim();
+  const branchNameValue = elements.deviceBranchNameInput.value.trim();
+  const terminalNo = elements.deviceTerminalNoInput.value.trim().toUpperCase();
+  if (!branchCode && !branchNameValue) {
+    alert("Enter the branch code or branch name.");
+    elements.deviceBranchCodeInput.focus();
+    return;
+  }
+  if (!terminalNo) {
+    alert("Enter the POS terminal number.");
+    elements.deviceTerminalNoInput.focus();
+    return;
+  }
+
+  posDeviceSetup = {
+    branchCode,
+    branchName: branchNameValue,
+    terminalNo,
+    updatedAt: new Date().toISOString(),
+    updatedBy: appUser?.username || "",
+  };
+  savePosDeviceSetup();
+  renderDeviceSetup();
+  renderPos();
+  alert(`Device setup saved.\nBranch: ${getPosBranchName()}\nTerminal: ${getPosTerminalNo()}`);
 }
 
 function ensurePosCrewFromAppUser() {
@@ -1055,6 +1137,10 @@ function startPosShift() {
     alert("Login crew first.");
     return;
   }
+  if (!hasPosDeviceSetup()) {
+    alert("POS Device Setup is required before Start Shift. Ask Administrator to set Branch and Terminal Number.");
+    return;
+  }
 
   posSession.shiftStarted = true;
   posSession.startedAt = new Date().toISOString();
@@ -1086,6 +1172,7 @@ function handlePosFloat(event) {
 }
 
 function renderPos() {
+  renderDeviceSetup();
   const hasCrew = Boolean(posSession.crew);
   const hasActiveRegister = hasCrew && posSession.active;
   const needsChangeFund = hasCrew && posSession.shiftStarted && !hasActiveRegister;
@@ -1598,7 +1685,7 @@ async function createVoidApprovalRequest(line, reason) {
   const payload = {
     device_request_id: deviceRequestId,
     transaction_id: posSession.currentTransactionId || createDeviceId("txn"),
-    branch_name: branchName || appUser?.branchName || "",
+    branch_name: getPosBranchName(),
     crew_username: posSession.crewUsername || posSession.crew || "",
     crew_name: posSession.crew || "",
     item_code: line.code,
@@ -1613,6 +1700,8 @@ async function createVoidApprovalRequest(line, reason) {
       line,
       requestedBy: posSession.crewUsername || posSession.crew || "",
       requestedFrom: appUser?.username || "",
+      branchCode: getPosBranchCode(),
+      terminalNo: getPosTerminalNo(),
     },
   };
 
@@ -1638,7 +1727,7 @@ async function logApprovedVoid(line, reason) {
       body: JSON.stringify({
         device_request_id: deviceRequestId,
         transaction_id: posSession.currentTransactionId || createDeviceId("txn"),
-        branch_name: branchName || appUser?.branchName || "",
+        branch_name: getPosBranchName(),
         crew_username: posSession.crewUsername || posSession.crew || "",
         crew_name: posSession.crew || "",
         item_code: line.code,
@@ -1653,7 +1742,7 @@ async function logApprovedVoid(line, reason) {
         decided_by: posSession.crewUsername || posSession.crew || "",
         decision_note: "Direct authorized void",
         applied_at: new Date().toISOString(),
-        raw_payload: { line },
+        raw_payload: { line, branchCode: getPosBranchCode(), terminalNo: getPosTerminalNo() },
       }),
     });
   } catch {
@@ -1775,6 +1864,9 @@ async function completePosSale() {
     transactionNo: createTransactionNo(),
     crew: posSession.crew,
     crewUsername: posSession.crewUsername || posSession.crew,
+    branchCode: getPosBranchCode(),
+    branchName: getPosBranchName(),
+    terminalNo: getPosTerminalNo(),
     createdAt: new Date().toISOString(),
     total,
     payment,
@@ -1998,8 +2090,9 @@ function archiveCurrentElectronicJournal(readingType = "Y") {
     fileName: posSession.ejFileName || buildElectronicJournalFilename(readingType),
     crew: posSession.crew || "",
     crewUsername: posSession.crewUsername || "",
-    branch: branchName || appUser?.branchName || "",
-    posNo: POS_RECEIPT_PROFILE.posNo,
+    branch: getPosBranchName(),
+    branchCode: getPosBranchCode(),
+    posNo: getPosTerminalNo(),
     startedAt: posSession.startedAt || "",
     closedAt,
     entryCount: entries.length,
@@ -2087,7 +2180,8 @@ function buildOpeningFundText(floatAmount) {
     "",
     ejColumns("Crew:", posSession.crew || "Not set", 14, 26),
     ejColumns("Started:", posSession.startedAt ? formatReceiptDate(posSession.startedAt) : formatReceiptDate(new Date().toISOString()), 14, 26),
-    ejColumns("POS #", POS_RECEIPT_PROFILE.posNo, 14, 26),
+    ejColumns("Branch:", getPosBranchName() || "Not set", 14, 26),
+    ejColumns("POS #", getPosTerminalNo(), 14, 26),
     ejLine(),
     ejColumns("Change Fund", formatMoney(floatAmount || 0), 26, 14),
     ejLine(),
@@ -2148,7 +2242,7 @@ function buildSalesInvoiceText(sale) {
     "",
     ejColumns("SI No:", sale.invoiceNo || sale.id || "", 7, 21),
     ejColumns(`Staff: ${shortenText(sale.crew || sale.crewUsername || "", 13)}`, `Trans: ${sale.transactionNo || ""}`, 20, 20),
-    ejColumns(`Date:  ${formatReceiptDate(sale.createdAt)}`, `POS # ${POS_RECEIPT_PROFILE.posNo}`, 23, 17),
+    ejColumns(`Date:  ${formatReceiptDate(sale.createdAt)}`, `POS # ${sale.terminalNo || getPosTerminalNo()}`, 23, 17),
     ejLine(),
     ejColumns("Description", "Amount", 28, 12),
     ejLine(),
@@ -2229,7 +2323,8 @@ function buildPosReadingText(type = "X") {
     ejColumns("Crew:", posSession.crew || "Not set", 14, 26),
     ejColumns("Started:", posSession.startedAt ? formatReceiptDate(posSession.startedAt) : "Not set", 14, 26),
     ejColumns("Closed:", formatReceiptDate(new Date().toISOString()), 14, 26),
-    ejColumns("POS #", POS_RECEIPT_PROFILE.posNo, 14, 26),
+    ejColumns("Branch:", getPosBranchName() || "Not set", 14, 26),
+    ejColumns("POS #", getPosTerminalNo(), 14, 26),
     ejLine(),
     ejColumns("Transactions", transactionCount.toLocaleString(), 26, 14),
     ejColumns("Items", itemCount.toLocaleString(), 26, 14),
@@ -2670,7 +2765,7 @@ async function fetchProductPage(offset, batchSize) {
 async function uploadOneSale(sale) {
   const transactionPayload = {
     device_sale_id: sale.id,
-    branch_name: branchName || "Not set",
+    branch_name: sale.branchName || getPosBranchName() || "Not set",
     crew_username: sale.crewUsername || sale.crew || "Unknown",
     shift_started_at: posSession.startedAt || null,
     sold_at: sale.createdAt || new Date().toISOString(),
@@ -2679,7 +2774,12 @@ async function uploadOneSale(sale) {
     amount_tendered: sanitizeMoney(sale.payment?.amountTendered ?? sale.total),
     change_amount: sanitizeMoney(sale.payment?.change || 0),
     gcash_reference: sale.payment?.reference || null,
-    raw_payload: sale,
+    raw_payload: {
+      ...sale,
+      branchCode: sale.branchCode || getPosBranchCode(),
+      branchName: sale.branchName || getPosBranchName(),
+      terminalNo: sale.terminalNo || getPosTerminalNo(),
+    },
   };
 
   const existing = await findCloudSale(sale.id);
@@ -2737,7 +2837,7 @@ async function writeSyncLog(syncType, status, message) {
       },
       body: JSON.stringify({
         device_id: appUser?.username || "phone",
-        branch_name: branchName || "",
+        branch_name: getPosBranchName() || branchName || "",
         sync_type: syncType,
         status,
         message,
@@ -3568,7 +3668,7 @@ function formatReceiptDate(isoDate) {
 
 function buildElectronicJournalFilename(readingType = "X") {
   const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, "");
-  const posPart = POS_RECEIPT_PROFILE.posNo.replace(/\W/g, "");
+  const posPart = getPosTerminalNo().replace(/\W/g, "") || "POS";
   return `EJ${posPart}${datePart}-${readingType}.TXT`;
 }
 
@@ -3688,6 +3788,25 @@ function loadPosEJournalArchive() {
     return JSON.parse(localStorage.getItem(POS_EJ_ARCHIVE_KEY)) || [];
   } catch {
     return [];
+  }
+}
+
+function savePosDeviceSetup() {
+  localStorage.setItem(POS_DEVICE_SETUP_KEY, JSON.stringify(posDeviceSetup));
+}
+
+function loadPosDeviceSetup() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(POS_DEVICE_SETUP_KEY)) || {};
+    return {
+      branchCode: stored.branchCode || "",
+      branchName: stored.branchName || "",
+      terminalNo: stored.terminalNo || "",
+      updatedAt: stored.updatedAt || "",
+      updatedBy: stored.updatedBy || "",
+    };
+  } catch {
+    return { branchCode: "", branchName: "", terminalNo: "", updatedAt: "", updatedBy: "" };
   }
 }
 
