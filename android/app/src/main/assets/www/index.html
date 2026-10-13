@@ -638,6 +638,87 @@
           </label>
           <button class="secondary-button" id="downloadAdminEJournalButton" type="button">Download Selected EJ</button>
         </section>
+
+        <section class="quick-sale-panel">
+          <div class="section-heading">
+            <h2>Branch Sync Workflow</h2>
+            <span>Design preview</span>
+          </div>
+
+          <div class="admin-workflow-grid">
+            <article class="workflow-card">
+              <span>Branches</span>
+              <strong>3 Active</strong>
+              <small>Branch 412, Branch 520, Branch 117</small>
+            </article>
+            <article class="workflow-card">
+              <span>Terminals</span>
+              <strong>5 POS</strong>
+              <small>Phones can be reassigned when branches transfer equipment.</small>
+            </article>
+          </div>
+
+          <div class="workflow-list">
+            <div class="workflow-row">
+              <div>
+                <strong>Branch 412</strong>
+                <small>POS 1 active, POS 2 active</small>
+              </div>
+              <span>Open</span>
+            </div>
+            <div class="workflow-row">
+              <div>
+                <strong>Branch 520</strong>
+                <small>POS 1 active</small>
+              </div>
+              <span>Open</span>
+            </div>
+            <div class="workflow-row">
+              <div>
+                <strong>Branch 117</strong>
+                <small>POS 1 transferring from Branch 412</small>
+              </div>
+              <span>Setup</span>
+            </div>
+          </div>
+
+          <div class="scope-preview">
+            <strong>Quick Button Scope</strong>
+            <div class="payment-methods scope-methods" role="group" aria-label="Quick button scope preview">
+              <button class="is-active" type="button">All Branches</button>
+              <button type="button">Selected Branches</button>
+            </div>
+            <label class="scope-check">
+              <input checked type="checkbox" disabled />
+              <span>Branch 412 receives this button</span>
+            </label>
+            <label class="scope-check">
+              <input checked type="checkbox" disabled />
+              <span>Branch 520 receives this button</span>
+            </label>
+            <label class="scope-check">
+              <input checked type="checkbox" disabled />
+              <span>Branch 117 receives this button</span>
+            </label>
+          </div>
+
+          <div class="workflow-list">
+            <div class="workflow-row">
+              <div>
+                <strong>Terminal Transfer</strong>
+                <small>Device keeps history: old branch sales stay under old branch.</small>
+              </div>
+              <span>Next build</span>
+            </div>
+            <div class="workflow-row">
+              <div>
+                <strong>Sync Rule</strong>
+                <small>POS downloads global buttons plus buttons assigned to its current branch.</small>
+              </div>
+              <span>Planned</span>
+            </div>
+          </div>
+        </section>
       </section>
 
       <nav class="bottom-nav storecount-chrome" aria-label="Primary navigation" hidden>

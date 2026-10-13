@@ -1,4 +1,4 @@
-const CACHE_NAME = "storecount-v45";
+const CACHE_NAME = "storecount-v46";
 const APP_FILES = [
   "./",
   "./index.html",
