@@ -431,6 +431,8 @@ function showPos() {
   activeModule = "pos";
   stopScanner();
   ensurePosCrewFromAppUser();
+  elements.authScreen.hidden = true;
+  elements.appShell.hidden = false;
   elements.homePanel.classList.remove("is-active");
   elements.storeCountChrome.forEach((item) => (item.hidden = true));
   Object.entries(elements.panels).forEach(([key, panel]) => {
