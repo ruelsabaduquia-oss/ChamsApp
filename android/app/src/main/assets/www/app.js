@@ -195,6 +195,7 @@ const elements = {
   quickButtonGrid: $("#quickButtonGrid"),
   adminQuickButtonCount: $("#adminQuickButtonCount"),
   adminQuickButtonGrid: $("#adminQuickButtonGrid"),
+  adminSyncQuickButtonsButton: $("#adminSyncQuickButtonsButton"),
   adminEJournalCount: $("#adminEJournalCount"),
   adminEJournalSelect: $("#adminEJournalSelect"),
   downloadAdminEJournalButton: $("#downloadAdminEJournalButton"),
@@ -346,6 +347,7 @@ function bindEvents() {
   elements.posXReadingButton.addEventListener("click", () => renderPosReading("X"));
   elements.posEJournalButton.addEventListener("click", () => downloadShiftElectronicJournal("X"));
   elements.posYReadingButton.addEventListener("click", closePosShift);
+  elements.adminSyncQuickButtonsButton.addEventListener("click", () => syncAdminQuickButtons({ notify: true }));
   elements.downloadAdminEJournalButton.addEventListener("click", downloadSelectedArchivedEJournal);
   elements.syncAllButton.addEventListener("click", syncAll);
   elements.downloadProductsButton.addEventListener("click", downloadProductsFromCloud);
@@ -515,7 +517,7 @@ function showAdminSetup() {
   renderAdminQuickButtons();
   renderQuickButtonSearchResults();
   renderAdminEJournalList();
-  uploadLocalQuickButtonsToCloud();
+  syncAdminQuickButtons({ notify: false });
 }
 
 function updateScreenTitle(title) {
@@ -2537,6 +2539,26 @@ async function downloadQuickButtonsFromCloud(options = {}) {
     throw error;
   } finally {
     if (!options.silent) setSyncBusy(false);
+  }
+}
+
+async function syncAdminQuickButtons(options = {}) {
+  if (!isAdminUser()) return;
+  const notify = Boolean(options.notify);
+  const originalLabel = elements.adminQuickButtonCount.textContent;
+  elements.adminQuickButtonCount.textContent = "syncing...";
+  elements.adminSyncQuickButtonsButton.disabled = true;
+
+  try {
+    await uploadLocalQuickButtonsToCloud();
+    const result = await downloadQuickButtonsFromCloud({ silent: true });
+    elements.adminQuickButtonCount.textContent = `${posQuickButtons.length.toLocaleString()} saved`;
+    if (notify) alert(`Quick buttons synced.\n${result.updated.toLocaleString()} button(s) loaded from cloud.`);
+  } catch (error) {
+    elements.adminQuickButtonCount.textContent = originalLabel || `${posQuickButtons.length.toLocaleString()} saved`;
+    if (notify) alert(`Quick button sync failed.\n${error.message}`);
+  } finally {
+    elements.adminSyncQuickButtonsButton.disabled = false;
   }
 }
 
