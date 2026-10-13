@@ -26,6 +26,7 @@ let currentStatusFilter = "all";
 let currentReportFilter = "in-stock";
 let keypadOverwrite = true;
 let deferredInstallPrompt = null;
+let posLookupSelectedCode = "";
 let scanner = {
   detector: null,
   stream: null,
@@ -160,6 +161,7 @@ const elements = {
   posScanStatus: $("#posScanStatus"),
   posManualBarcodeForm: $("#posManualBarcodeForm"),
   posBarcodeInput: $("#posBarcodeInput"),
+  posLookupResults: $("#posLookupResults"),
   quickButtonCount: $("#quickButtonCount"),
   quickButtonGrid: $("#quickButtonGrid"),
   adminQuickButtonCount: $("#adminQuickButtonCount"),
@@ -295,9 +297,14 @@ function bindEvents() {
   elements.posStopScanButton.addEventListener("click", stopPosScanner);
   elements.posManualBarcodeForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    handlePosBarcode(elements.posBarcodeInput.value, "manual");
+    const selectedCode = posLookupSelectedCode;
+    if (selectedCode) addPosItemByCode(selectedCode, "manual");
+    else handlePosBarcode(elements.posBarcodeInput.value, "manual");
+    posLookupSelectedCode = "";
     elements.posBarcodeInput.value = "";
+    renderPosLookupResults();
   });
+  elements.posBarcodeInput.addEventListener("input", renderPosLookupResults);
   elements.quickButtonSearchInput.addEventListener("input", renderQuickButtonSearchResults);
   elements.posCompleteSaleButton.addEventListener("click", handlePosTransactionButton);
   elements.posCheckVoidStatusButton.addEventListener("click", checkVoidRequestStatuses);
@@ -458,6 +465,7 @@ async function handleFileUpload(event) {
   const stockIndex = headers.findIndex((header) => ["stock", "stock qty", "stock quantity", "inventory", "inventory qty", "on hand", "stock on hand"].includes(header));
   const barcodeIndex = headers.findIndex((header) => ["barcode", "bar code", "upc", "ean"].includes(header));
   const priceIndex = headers.findIndex((header) => ["price", "selling price", "retail price", "srp", "unit price"].includes(header));
+  const supplierIndex = headers.findIndex((header) => ["supplier", "supplier name", "vendor", "vendor name"].includes(header));
   const keepBaseline = getInitStrategy() === "baseline";
 
   if (skuIndex === -1 || descIndex === -1) {
@@ -473,7 +481,8 @@ async function handleFileUpload(event) {
       keepBaseline,
       barcodeIndex !== -1 ? row[barcodeIndex] : "",
       priceIndex !== -1 ? row[priceIndex] : "",
-      stockIndex !== -1 ? row[stockIndex] : null
+      stockIndex !== -1 ? row[stockIndex] : null,
+      supplierIndex !== -1 ? row[supplierIndex] : ""
     );
   });
 
@@ -498,12 +507,13 @@ function handleManualAdd(event) {
   render();
 }
 
-function upsertSku(code, description, qty = null, saved = null, barcode = "", price = "", stockQty = null) {
+function upsertSku(code, description, qty = null, saved = null, barcode = "", price = "", stockQty = null, supplierName = "") {
   const cleanCode = String(code || "").trim();
   const cleanDescription = String(description || "").trim();
   const cleanBarcode = String(barcode || "").trim();
   const cleanPrice = sanitizeMoney(price);
   const cleanStockQty = parseOptionalStockQty(stockQty);
+  const cleanSupplierName = String(supplierName || "").trim();
   const shouldSetQty = qty !== null;
   const cleanQty = shouldSetQty ? sanitizeQty(qty) : 0;
   if (!cleanCode || !cleanDescription) return false;
@@ -514,6 +524,7 @@ function upsertSku(code, description, qty = null, saved = null, barcode = "", pr
     existing.barcode = cleanBarcode || existing.barcode || "";
     if (cleanPrice > 0) existing.price = cleanPrice;
     if (cleanStockQty !== null) existing.stockQty = cleanStockQty;
+    if (cleanSupplierName) existing.supplierName = cleanSupplierName;
     if (shouldSetQty) existing.qty = cleanQty;
     if (saved !== null) {
       existing.saved = Boolean(saved);
@@ -528,6 +539,7 @@ function upsertSku(code, description, qty = null, saved = null, barcode = "", pr
     barcode: cleanBarcode,
     price: cleanPrice,
     stockQty: cleanStockQty,
+    supplierName: cleanSupplierName,
     qty: cleanQty,
     saved: Boolean(saved),
     updatedAt: saved ? new Date().toISOString() : null,
@@ -1171,6 +1183,76 @@ function renderQuickButtons() {
   });
 }
 
+function renderPosLookupResults() {
+  posLookupSelectedCode = "";
+  elements.posLookupResults.innerHTML = "";
+  const query = elements.posBarcodeInput.value.trim();
+  if (!query) return;
+
+  const matches = findProductLookupMatches(query, 12);
+  if (!matches.length) {
+    elements.posLookupResults.innerHTML = `<div class="empty-state compact"><strong>No match found</strong><p>Try SKU, barcode, item name, or supplier.</p></div>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  matches.forEach((item) => {
+    const row = document.createElement("button");
+    row.className = "pos-lookup-row";
+    row.type = "button";
+    row.innerHTML = `
+      <div>
+        <strong>${escapeHtml(item.description)}</strong>
+        <small>${escapeHtml(getLookupMeta(item))}</small>
+      </div>
+      <span>${formatMoney(item.price || 0)}</span>
+    `;
+    row.addEventListener("click", () => {
+      posLookupSelectedCode = item.code;
+      elements.posBarcodeInput.value = item.barcode || item.code;
+      elements.posLookupResults.innerHTML = `<div class="pos-lookup-selected"><strong>${escapeHtml(item.description)}</strong><small>Selected. Tap Add Item.</small></div>`;
+    });
+    fragment.appendChild(row);
+  });
+  elements.posLookupResults.appendChild(fragment);
+}
+
+function findProductLookupMatches(query, limit = 12) {
+  const cleanQuery = query.trim().toLowerCase();
+  const cleanBarcodeQuery = normalizeBarcode(query);
+  if (!cleanQuery) return [];
+
+  const scored = inventory
+    .map((item) => {
+      const barcode = normalizeBarcode(item.barcode);
+      const code = normalizeBarcode(item.code);
+      const description = String(item.description || "").toLowerCase();
+      const supplier = String(item.supplierName || "").toLowerCase();
+      let score = 0;
+
+      if (barcode && barcode.startsWith(cleanBarcodeQuery)) score = 100;
+      else if (code.startsWith(cleanBarcodeQuery)) score = 90;
+      else if (barcode && barcode.includes(cleanBarcodeQuery)) score = 80;
+      else if (code.includes(cleanBarcodeQuery)) score = 70;
+      else if (supplier && supplier.includes(cleanQuery)) score = 60;
+      else if (description.includes(cleanQuery)) score = 50;
+
+      return score ? { item, score } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score || a.item.description.localeCompare(b.item.description));
+
+  return scored.slice(0, limit).map((match) => match.item);
+}
+
+function getLookupMeta(item) {
+  const parts = [item.barcode || item.code, item.code];
+  if (item.supplierName) parts.push(item.supplierName);
+  const stockQty = getStockQty(item);
+  if (stockQty !== null) parts.push(`Stock ${stockQty.toLocaleString()}`);
+  return parts.filter(Boolean).join(" | ");
+}
+
 function renderQuickButtonSearchResults() {
   if (!isAdminUser()) return;
   const query = elements.quickButtonSearchInput.value.trim().toLowerCase();
@@ -1187,7 +1269,9 @@ function renderQuickButtonSearchResults() {
       return (
         !alreadyAdded &&
         (!normalizeBarcode(item.barcode) || String(item.barcode || "").trim() === "") &&
-        (item.code.toLowerCase().includes(query) || item.description.toLowerCase().includes(query))
+        (item.code.toLowerCase().includes(query) ||
+          item.description.toLowerCase().includes(query) ||
+          String(item.supplierName || "").toLowerCase().includes(query))
       );
     })
     .slice(0, 12);
@@ -1204,7 +1288,7 @@ function renderQuickButtonSearchResults() {
     row.innerHTML = `
       <div>
         <strong>${escapeHtml(item.description)}</strong>
-        <small>${escapeHtml(item.code)} | ${formatMoney(item.price || 0)}</small>
+        <small>${escapeHtml(getLookupMeta(item))} | ${formatMoney(item.price || 0)}</small>
       </div>
       <button class="secondary-button" type="button">Add</button>
     `;
@@ -1944,17 +2028,21 @@ async function downloadProductsFromCloud(options = {}) {
     let updated = 0;
 
     while (true) {
-      const products = await supabaseRequest(
-        `/rest/v1/products?select=sku_code,barcode,description,price,stock_qty&is_active=eq.true&order=sku_code.asc`,
-        {
-          headers: {
-            Range: `${offset}-${offset + batchSize - 1}`,
-          },
-        }
-      );
+      const products = await fetchProductPage(offset, batchSize);
 
       products.forEach((product) => {
-        if (upsertSku(product.sku_code, product.description, null, null, product.barcode || "", product.price || 0, product.stock_qty)) {
+        if (
+          upsertSku(
+            product.sku_code,
+            product.description,
+            null,
+            null,
+            product.barcode || "",
+            product.price || 0,
+            product.stock_qty,
+            product.supplier_name || ""
+          )
+        ) {
           updated += 1;
         }
       });
@@ -2005,6 +2093,25 @@ async function uploadSalesToCloud(options = {}) {
     throw error;
   } finally {
     if (!options.silent) setSyncBusy(false);
+  }
+}
+
+async function fetchProductPage(offset, batchSize) {
+  const headers = {
+    Range: `${offset}-${offset + batchSize - 1}`,
+  };
+
+  try {
+    return await supabaseRequest(
+      `/rest/v1/products?select=sku_code,barcode,description,price,stock_qty,supplier_name&is_active=eq.true&order=sku_code.asc`,
+      { headers }
+    );
+  } catch (error) {
+    if (!String(error.message || "").includes("supplier_name")) throw error;
+    return supabaseRequest(
+      `/rest/v1/products?select=sku_code,barcode,description,price,stock_qty&is_active=eq.true&order=sku_code.asc`,
+      { headers }
+    );
   }
 }
 
@@ -2457,6 +2564,7 @@ function resetActiveAudit() {
   stopScanner();
   inventory = inventory.map((item) => ({
     ...item,
+    supplierName: item.supplierName || item.supplier_name || "",
     qty: 0,
     saved: false,
     updatedAt: null,
@@ -2845,7 +2953,11 @@ function saveInventory() {
 
 function loadInventory() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+    return stored.map((item) => ({
+      ...item,
+      supplierName: item.supplierName || item.supplier_name || "",
+    }));
   } catch {
     return [];
   }

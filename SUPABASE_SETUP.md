@@ -84,6 +84,18 @@ After `supabase/schema.sql` is complete:
 
 This adds `stock_qty` to products so POS can warn when an item is out of inventory.
 
+## Add Product Supplier Name
+
+If your products table already exists:
+
+1. Go to **SQL Editor** again.
+2. Open `supabase/product_supplier.sql` from this project.
+3. Copy the full SQL script.
+4. Paste it into Supabase SQL Editor.
+5. Click **Run**.
+
+This adds `supplier_name` so POS manual lookup can search by supplier/vendor.
+
 ## Important Key Safety
 
 The app can use the Supabase **anon public** key.

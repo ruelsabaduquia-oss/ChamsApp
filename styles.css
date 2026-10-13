@@ -1191,6 +1191,52 @@ select:focus {
   color: var(--scan);
 }
 
+.pos-lookup-results {
+  display: grid;
+  gap: 8px;
+}
+
+.pos-lookup-row,
+.pos-lookup-selected {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 54px;
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 10px;
+  background: #ffffff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.pos-lookup-row strong,
+.pos-lookup-selected strong,
+.pos-lookup-row small,
+.pos-lookup-selected small {
+  display: block;
+}
+
+.pos-lookup-row small,
+.pos-lookup-selected small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.pos-lookup-row > span {
+  color: var(--scan);
+  font-weight: 900;
+}
+
+.pos-lookup-selected {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
 .manual-keypad[hidden] {
   display: none;
 }
