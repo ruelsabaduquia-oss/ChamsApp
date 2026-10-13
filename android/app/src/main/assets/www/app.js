@@ -6,6 +6,31 @@ const APP_USER_KEY = "storecount_app_user_v1";
 const POS_SESSION_KEY = "storecount_pos_session_v1";
 const SYNC_STATE_KEY = "storecount_sync_state_v1";
 const POS_QUICK_BUTTONS_KEY = "storecount_pos_quick_buttons_v1";
+const POS_RECEIPT_COUNTER_KEY = "storecount_pos_receipt_counter_v1";
+const EJ_WIDTH = 40;
+const POS_RECEIPT_PROFILE = {
+  storeName: "CHAM'S CONVENIENCE STORE",
+  companyName: "LCG Marketing Phils. Corporation",
+  addressLines: ["HBC BLDGDOOR 2, A & S SPACE RENTAL", "LOWER ENTRANCE BALULANG,CAGAYAN DE ORO"],
+  tin: "004-440-261-00051",
+  serialNo: "S4ARAC01R3833Y7",
+  min: "24112115531814642",
+  posNo: "P033",
+  softwareLines: [
+    "RETAIL SOFTWARE ASSOCIATES CORP.",
+    "3501 35F Raffles Corporate Center,",
+    "F. Ortigas Jr. Ave.Ortigas Center",
+    "San Antonio, Pasig City",
+    "TIN: 243-383-976-00000",
+    "ACCDTN NO: 43A2433839762019041058",
+    "Date of Issuance: 04/10/2019",
+    "Effectivity Date: 08/01/2020",
+    "Valid Until: 07/31/2025",
+    "PTU No. FP112024-098-0485079-00051",
+    "Date of Issuance: 11/26/2024",
+    "Effectivity Date: 11/26/2024",
+  ],
+};
 const SUPABASE_URL = "https://nzgdfygljemhapabbsnf.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56Z2RmeWdsamVtaGFwYWJic25mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3NzY2ODksImV4cCI6MjEwNzM1MjY4OX0.MRcXcfy3RFY93VwKDEUIBhQiwAOmireZo4-Kk-N617g";
@@ -175,6 +200,7 @@ const elements = {
   posClearCartButton: $("#posClearCartButton"),
   posXReadingButton: $("#posXReadingButton"),
   posYReadingButton: $("#posYReadingButton"),
+  posEJournalButton: $("#posEJournalButton"),
   posReadingLabel: $("#posReadingLabel"),
   posReadingDetails: $("#posReadingDetails"),
   syncStatusBadge: $("#syncStatusBadge"),
@@ -313,6 +339,7 @@ function bindEvents() {
   elements.posCheckVoidStatusButton.addEventListener("click", checkVoidRequestStatuses);
   elements.posClearCartButton.addEventListener("click", clearPosCart);
   elements.posXReadingButton.addEventListener("click", () => renderPosReading("X"));
+  elements.posEJournalButton.addEventListener("click", () => downloadShiftElectronicJournal("X"));
   elements.posYReadingButton.addEventListener("click", closePosShift);
   elements.syncAllButton.addEventListener("click", syncAll);
   elements.downloadProductsButton.addEventListener("click", downloadProductsFromCloud);
@@ -1728,6 +1755,8 @@ async function completePosSale() {
 
   const sale = {
     id: posSession.currentTransactionId || createDeviceId("sale"),
+    invoiceNo: createSalesInvoiceNo(),
+    transactionNo: createTransactionNo(),
     crew: posSession.crew,
     crewUsername: posSession.crewUsername || posSession.crew,
     createdAt: new Date().toISOString(),
@@ -1917,10 +1946,144 @@ function closePosShift() {
   renderPosReading("Y");
   if (!confirm("Y Reading will close the current POS shift. Continue?")) return;
   if (posSession.cart.length && !confirm("There is an active transaction. Close and void it?")) return;
+  downloadShiftElectronicJournal("Y");
   posSession = createEmptyPosSession();
   savePosSession();
   stopPosScanner();
   renderPos();
+}
+
+function downloadShiftElectronicJournal(readingType = "X") {
+  if (!posSession.sales.length) {
+    alert("No completed POS sales in this shift yet.");
+    return;
+  }
+
+  const ejText = buildElectronicJournalText(readingType);
+  const blob = new Blob([ejText], { type: "text/plain;charset=utf-8" });
+  saveBlob(blob, buildElectronicJournalFilename(readingType));
+}
+
+function buildElectronicJournalText(readingType = "X") {
+  const receipts = [...posSession.sales].reverse().map((sale) => buildSalesInvoiceText(sale));
+  receipts.push(buildPosReadingText(readingType));
+  return `${receipts.join("\n\n")}\n`;
+}
+
+function buildSalesInvoiceText(sale) {
+  const totals = computeSaleTaxTotals(sale);
+  const payment = sale.payment || {};
+  const paymentLabel = getPaymentLabel(payment.method);
+  const paymentAmount = payment.method === "cash" ? -sanitizeMoney(payment.amountTendered) : -sanitizeMoney(payment.amountPaid || sale.total);
+  const lines = [
+    ...buildReceiptHeader(),
+    ejLine(),
+    ejCenter("S A L E S  I N V O I C E"),
+    "",
+    ejColumns("SI No:", sale.invoiceNo || sale.id || "", 7, 21),
+    ejColumns(`Staff: ${shortenText(sale.crew || sale.crewUsername || "", 13)}`, `Trans: ${sale.transactionNo || ""}`, 20, 20),
+    ejColumns(`Date:  ${formatReceiptDate(sale.createdAt)}`, `POS # ${POS_RECEIPT_PROFILE.posNo}`, 23, 17),
+    ejLine(),
+    ejColumns("Description", "Amount", 28, 12),
+    ejLine(),
+  ];
+
+  (sale.items || []).forEach((item) => {
+    lines.push(ejLeft(shortenText(item.description || item.code, EJ_WIDTH)));
+    const qty = Number(item.qty || 0);
+    const price = sanitizeMoney(item.price || 0);
+    const amount = sanitizeMoney(qty * price);
+    lines.push(ejColumns(`   ${formatQty(qty)} pc @ ${formatMoney(price)}`, `${formatMoney(amount)}  V`, 25, 15));
+  });
+
+  lines.push(
+    ejLine(),
+    ejColumns("Sales", formatMoney(totals.sales), 26, 14),
+    ejColumns("Price excl. of VAT", formatMoney(totals.vatExclusive), 26, 14),
+    ejColumns("Less Disc:", "0.00", 26, 14),
+    ejColumns("NET Sales", formatMoney(totals.vatExclusive), 26, 14),
+    ejColumns("Plus VAT Amount", formatMoney(totals.vatAmount), 26, 14),
+    ejColumns("Total PHP", formatMoney(totals.sales), 26, 14),
+    ejColumns(paymentLabel, formatSignedMoney(paymentAmount), 26, 14),
+    ejColumns("Change", formatMoney(payment.change || 0), 26, 14),
+    ejLine(),
+    ejColumns("VAT Adjustments:", "0.00", 26, 14),
+    ejLine(),
+    ejColumns("", "Amount   VAT Amt.", 16, 24),
+    ejColumns("VATEX", `${formatMoney(0)}       ${formatMoney(0)}`, 16, 24),
+    ejColumns("VAT12%", `${formatMoney(totals.vatExclusive)}      ${formatMoney(totals.vatAmount)}`, 16, 24),
+    ejColumns("Zero-Rated", `${formatMoney(0)}       ${formatMoney(0)}`, 16, 24),
+    ejLine(),
+    ejColumns("Salesman Code", "Salesman Name", 20, 20),
+    ejColumns(sale.crewUsername || "", sale.crew || "", 20, 20),
+    ejLine(),
+    "",
+    "Name:       _______________________",
+    "TIN:        _______________________",
+    "ID:         _______________________",
+    "Address:    _______________________",
+    "Bus. Style: _______________________",
+    "Signature:  _______________________",
+    "",
+    ejLine(),
+    ejLine(),
+    ...POS_RECEIPT_PROFILE.softwareLines.map(ejCenter),
+    "",
+    ejCenter("THIS SERVES AS YOUR SALES INVOICE.")
+  );
+
+  return lines.map((line) => ejFit(line)).join("\n");
+}
+
+function buildReceiptHeader() {
+  return [
+    ejCenter(POS_RECEIPT_PROFILE.storeName),
+    ejCenter(POS_RECEIPT_PROFILE.companyName),
+    ...POS_RECEIPT_PROFILE.addressLines.map(ejCenter),
+    ejCenter(`VAT Registered TIN ${POS_RECEIPT_PROFILE.tin}`),
+    ejCenter(`SERIAL No: ${POS_RECEIPT_PROFILE.serialNo}`),
+    ejCenter(`MIN ${POS_RECEIPT_PROFILE.min}`),
+  ];
+}
+
+function buildPosReadingText(type = "X") {
+  const salesTotal = getPosSalesTotal();
+  const cashTotal = getPosPaymentTotal("cash");
+  const gcashTotal = getPosPaymentTotal("gcash");
+  const cardTotal = getPosPaymentTotal("card");
+  const transactionCount = posSession.sales.length;
+  const itemCount = posSession.sales.reduce((sum, sale) => sum + sale.items.reduce((lineSum, item) => lineSum + Number(item.qty || 0), 0), 0);
+  const totals = computeSaleTaxTotals({ total: salesTotal, items: [] });
+
+  return [
+    ...buildReceiptHeader(),
+    ejLine(),
+    ejCenter(`${type} READING`),
+    "",
+    ejColumns("Crew:", posSession.crew || "Not set", 14, 26),
+    ejColumns("Started:", posSession.startedAt ? formatReceiptDate(posSession.startedAt) : "Not set", 14, 26),
+    ejColumns("Closed:", formatReceiptDate(new Date().toISOString()), 14, 26),
+    ejColumns("POS #", POS_RECEIPT_PROFILE.posNo, 14, 26),
+    ejLine(),
+    ejColumns("Transactions", transactionCount.toLocaleString(), 26, 14),
+    ejColumns("Items", itemCount.toLocaleString(), 26, 14),
+    ejColumns("Gross Sales", formatMoney(salesTotal), 26, 14),
+    ejColumns("VATable Sales", formatMoney(totals.vatExclusive), 26, 14),
+    ejColumns("VAT Amount", formatMoney(totals.vatAmount), 26, 14),
+    ejColumns("Cash Sales", formatMoney(cashTotal), 26, 14),
+    ejColumns("GCash Sales", formatMoney(gcashTotal), 26, 14),
+    ejColumns("Card Sales", formatMoney(cardTotal), 26, 14),
+    ejColumns("Change Fund", formatMoney(posSession.float || 0), 26, 14),
+    ejColumns("Total Cash", formatMoney(Number(posSession.float || 0) + cashTotal), 26, 14),
+    ejLine(),
+  ].map((line) => ejFit(line)).join("\n");
+}
+
+function computeSaleTaxTotals(sale) {
+  const sales = sanitizeMoney(sale.total ?? (sale.items || []).reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.price || 0), 0));
+  const vatExclusive = sanitizeMoney(sales / 1.12);
+  const vatAmount = sanitizeMoney(sales - vatExclusive);
+  return { sales, vatExclusive, vatAmount };
 }
 
 function renderSync() {
@@ -3131,6 +3294,17 @@ function formatMoney(value) {
   return sanitizeMoney(value).toLocaleString([], { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function formatSignedMoney(value) {
+  const amount = Number(String(value ?? "").replace(/,/g, "").trim() || 0);
+  if (!Number.isFinite(amount)) return "0.00";
+  return amount.toLocaleString([], { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatQty(value) {
+  const number = Number(value || 0);
+  return Number.isInteger(number) ? number.toLocaleString() : number.toLocaleString([], { maximumFractionDigits: 3 });
+}
+
 function normalizeBarcode(value) {
   return String(value || "")
     .trim()
@@ -3140,6 +3314,72 @@ function normalizeBarcode(value) {
 
 function createDeviceId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createSalesInvoiceNo() {
+  return `SI${String(nextPosReceiptCounter()).padStart(12, "0")}`;
+}
+
+function createTransactionNo() {
+  return String(nextPosReceiptCounter()).padStart(6, "0");
+}
+
+function nextPosReceiptCounter() {
+  const current = Number(localStorage.getItem(POS_RECEIPT_COUNTER_KEY) || "172255");
+  const next = current + 1;
+  localStorage.setItem(POS_RECEIPT_COUNTER_KEY, String(next));
+  return next;
+}
+
+function getPaymentLabel(method) {
+  if (method === "gcash") return "GCash";
+  if (method === "card") return "Card";
+  return "Cash";
+}
+
+function ejLine(char = "-") {
+  return char.repeat(EJ_WIDTH);
+}
+
+function ejFit(value) {
+  return String(value ?? "").slice(0, EJ_WIDTH).padEnd(EJ_WIDTH, " ");
+}
+
+function ejCenter(value) {
+  const text = String(value ?? "").slice(0, EJ_WIDTH);
+  const left = Math.max(0, Math.floor((EJ_WIDTH - text.length) / 2));
+  return `${" ".repeat(left)}${text}`.padEnd(EJ_WIDTH, " ");
+}
+
+function ejLeft(value) {
+  return ejFit(value);
+}
+
+function ejColumns(left, right, leftWidth = 20, rightWidth = 20) {
+  const cleanLeft = String(left ?? "").slice(0, leftWidth).padEnd(leftWidth, " ");
+  const cleanRight = String(right ?? "").slice(0, rightWidth).padStart(rightWidth, " ");
+  return ejFit(`${cleanLeft}${cleanRight}`);
+}
+
+function shortenText(value, length) {
+  return String(value ?? "").slice(0, length);
+}
+
+function formatReceiptDate(isoDate) {
+  const date = isoDate ? new Date(isoDate) : new Date();
+  if (Number.isNaN(date.getTime())) return "";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const year = String(date.getFullYear()).slice(-2);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${month}/${day}/${year} ${hours}:${minutes}`;
+}
+
+function buildElectronicJournalFilename(readingType = "X") {
+  const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, "");
+  const posPart = POS_RECEIPT_PROFILE.posNo.replace(/\W/g, "");
+  return `EJ${posPart}${datePart}-${readingType}.TXT`;
 }
 
 function csvCell(value) {
