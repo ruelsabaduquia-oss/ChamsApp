@@ -56,6 +56,7 @@ const elements = {
   homePanel: $("#homePanel"),
   screenTitle: $("#screenTitle"),
   homeButton: $("#homeButton"),
+  logoutButton: $("#logoutButton"),
   openStoreCountButton: $("#openStoreCountButton"),
   openPosButton: $("#openPosButton"),
   openSyncButton: $("#openSyncButton"),
@@ -202,6 +203,7 @@ function init() {
 function bindEvents() {
   elements.appLoginForm.addEventListener("submit", handleAppLogin);
   elements.homeButton.addEventListener("click", () => showModuleHome());
+  elements.logoutButton.addEventListener("click", logoutApp);
   elements.openStoreCountButton.addEventListener("click", () => showStoreCount());
   elements.openPosButton.addEventListener("click", () => showPos());
   elements.openSyncButton.addEventListener("click", () => showSync());
@@ -367,7 +369,8 @@ async function handleAppLogin(event) {
   appUser = { ...verifiedUser, loggedAt: new Date().toISOString() };
   saveAppUser();
   elements.appLoginForm.reset();
-  showModuleHome();
+  if (isCrewUser()) showPos();
+  else showModuleHome();
 }
 
 function canUsePosFromAppUser() {
@@ -383,7 +386,8 @@ function renderAppShell() {
   elements.authScreen.hidden = loggedIn;
   elements.appShell.hidden = !loggedIn;
   if (!loggedIn) return;
-  if (activeModule === "pos") showPos();
+  if (isCrewUser()) showPos();
+  else if (activeModule === "pos") showPos();
   else if (activeModule === "sync") showSync();
   else if (activeModule === "admin") showAdminSetup();
   else if (activeModule === "storecount") showStoreCount();
@@ -391,6 +395,11 @@ function renderAppShell() {
 }
 
 function showModuleHome() {
+  if (isCrewUser()) {
+    showPos();
+    return;
+  }
+
   activeModule = "home";
   stopScanner();
   stopPosScanner();
@@ -407,6 +416,11 @@ function showModuleHome() {
 }
 
 function showStoreCount() {
+  if (isCrewUser()) {
+    showPos();
+    return;
+  }
+
   activeModule = "storecount";
   elements.homePanel.classList.remove("is-active");
   elements.storeCountChrome.forEach((item) => (item.hidden = false));
@@ -428,6 +442,11 @@ function showPos() {
 }
 
 function showSync() {
+  if (isCrewUser()) {
+    showPos();
+    return;
+  }
+
   activeModule = "sync";
   stopScanner();
   stopPosScanner();
@@ -465,6 +484,23 @@ function showAdminSetup() {
 
 function updateScreenTitle(title) {
   elements.screenTitle.textContent = title;
+}
+
+function logoutApp() {
+  if (posSession.transactionActive && posSession.cart.length) {
+    alert("Finish Cash Out before switching user. The current transaction is still unpaid.");
+    return;
+  }
+
+  stopScanner();
+  stopPosScanner();
+  appUser = null;
+  activeModule = "login";
+  posSession = { ...createEmptyPosSession(), sales: posSession.sales || [] };
+  savePosSession();
+  localStorage.removeItem(APP_USER_KEY);
+  elements.appLoginForm.reset();
+  renderAppShell();
 }
 
 async function handleFileUpload(event) {
@@ -957,6 +993,8 @@ async function handlePosCrewLogin(event) {
   posSession.crew = verifiedUser.displayName || verifiedUser.username;
   posSession.crewUsername = verifiedUser.username;
   posSession.crewRole = verifiedUser.role;
+  appUser = { ...verifiedUser, loggedAt: new Date().toISOString() };
+  saveAppUser();
   if (!branchName && verifiedUser.branchName) {
     branchName = verifiedUser.branchName;
     elements.branchInput.value = branchName;
