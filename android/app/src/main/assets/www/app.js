@@ -2418,11 +2418,12 @@ async function verifyCloudUser(username, password, requiredArea) {
     };
   } catch (error) {
     if (isUserSetupMissing(error)) {
-      alert("Cloud users are not set up yet. Temporary login allowed for now.");
+      const fallbackRole = getFallbackLoginRole(username, requiredArea);
+      alert(`Cloud users are not set up yet. Temporary ${fallbackRole} login allowed for now.`);
       return {
         username,
         displayName: username,
-        role: requiredArea === "pos" ? "crew" : "admin",
+        role: fallbackRole,
         branchName: "",
       };
     }
@@ -2435,6 +2436,16 @@ async function verifyCloudUser(username, password, requiredArea) {
 function isUserSetupMissing(error) {
   const message = String(error?.message || "").toLowerCase();
   return message.includes("verify_app_user") || message.includes("schema cache") || message.includes("function");
+}
+
+function getFallbackLoginRole(username, requiredArea) {
+  if (requiredArea === "pos") return "crew";
+
+  const cleanUsername = String(username || "").toLowerCase();
+  if (cleanUsername.includes("admin")) return "admin";
+  if (cleanUsername.includes("manager")) return "manager";
+  if (cleanUsername.includes("branch")) return "branch_head";
+  return "crew";
 }
 
 async function supabaseRequest(path, options = {}) {
