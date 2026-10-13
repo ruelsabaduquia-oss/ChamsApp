@@ -23,6 +23,7 @@ This creates the cloud tables for:
 - sales transactions
 - sales items
 - sync logs
+- POS quick buttons
 
 ## Create Login Users
 
@@ -95,6 +96,18 @@ If your products table already exists:
 5. Click **Run**.
 
 This adds `supplier_name` so POS manual lookup can search by supplier/vendor.
+
+## Create POS Quick Buttons Sync
+
+After products are already uploaded:
+
+1. Go to **SQL Editor** again.
+2. Open `supabase/pos_quick_buttons.sql` from this project.
+3. Copy the full SQL script.
+4. Paste it into Supabase SQL Editor.
+5. Click **Run**.
+
+This lets Admin Setup sync no-barcode quick buttons to every POS phone.
 
 ## Important Key Safety
 

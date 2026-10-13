@@ -27,6 +27,7 @@ let currentReportFilter = "in-stock";
 let keypadOverwrite = true;
 let deferredInstallPrompt = null;
 let posLookupSelectedCode = "";
+let posAutoSyncInProgress = false;
 let scanner = {
   detector: null,
   stream: null,
@@ -369,6 +370,14 @@ async function handleAppLogin(event) {
   showModuleHome();
 }
 
+function canUsePosFromAppUser() {
+  return ["admin", "manager", "branch_head", "crew"].includes(String(appUser?.role || "").toLowerCase());
+}
+
+function isCrewUser() {
+  return String(appUser?.role || "").toLowerCase() === "crew";
+}
+
 function renderAppShell() {
   const loggedIn = Boolean(appUser);
   elements.authScreen.hidden = loggedIn;
@@ -388,6 +397,9 @@ function showModuleHome() {
   elements.authScreen.hidden = true;
   elements.appShell.hidden = false;
   elements.homePanel.classList.add("is-active");
+  elements.openStoreCountButton.hidden = isCrewUser();
+  elements.openSyncButton.hidden = isCrewUser();
+  elements.openPosButton.hidden = !canUsePosFromAppUser();
   elements.openAdminButton.hidden = !isAdminUser();
   Object.values(elements.panels).forEach((panel) => panel.classList.remove("is-active"));
   elements.storeCountChrome.forEach((item) => (item.hidden = true));
@@ -404,6 +416,7 @@ function showStoreCount() {
 function showPos() {
   activeModule = "pos";
   stopScanner();
+  ensurePosCrewFromAppUser();
   elements.homePanel.classList.remove("is-active");
   elements.storeCountChrome.forEach((item) => (item.hidden = true));
   Object.entries(elements.panels).forEach(([key, panel]) => {
@@ -411,6 +424,7 @@ function showPos() {
   });
   updateScreenTitle("POS");
   renderPos();
+  autoSyncPosFromCloud();
 }
 
 function showSync() {
@@ -446,6 +460,7 @@ function showAdminSetup() {
   renderQuickButtons();
   renderAdminQuickButtons();
   renderQuickButtonSearchResults();
+  uploadLocalQuickButtonsToCloud();
 }
 
 function updateScreenTitle(title) {
@@ -564,6 +579,31 @@ function canApproveVoid(role) {
 
 function isAdminUser() {
   return String(appUser?.role || "").toLowerCase() === "admin";
+}
+
+function ensurePosCrewFromAppUser() {
+  if (
+    posSession.crewUsername &&
+    appUser?.username &&
+    posSession.crewUsername !== appUser.username &&
+    !posSession.transactionActive &&
+    !posSession.cart.length
+  ) {
+    posSession = { ...createEmptyPosSession(), sales: posSession.sales || [] };
+  }
+
+  if (posSession.crew || !canUsePosFromAppUser()) return;
+
+  posSession.crew = appUser.displayName || appUser.username;
+  posSession.crewUsername = appUser.username;
+  posSession.crewRole = appUser.role;
+  posSession.sales = posSession.sales || [];
+  if (!branchName && appUser.branchName) {
+    branchName = appUser.branchName;
+    elements.branchInput.value = branchName;
+    saveBranchName();
+  }
+  savePosSession();
 }
 
 function renderCatalogPreview() {
@@ -1356,6 +1396,7 @@ function addQuickButton(code) {
   renderQuickButtons();
   renderAdminQuickButtons();
   renderQuickButtonSearchResults();
+  syncQuickButtonToCloud(posQuickButtons.find((button) => button.code === item.code));
 }
 
 function removeQuickButton(code) {
@@ -1371,6 +1412,7 @@ function removeQuickButton(code) {
   renderQuickButtons();
   renderAdminQuickButtons();
   renderQuickButtonSearchResults();
+  removeQuickButtonFromCloud(button);
 }
 
 function handleQuickButtonSale(code) {
@@ -2009,13 +2051,39 @@ async function syncAll() {
   setSyncBusy(true, "Syncing...");
   try {
     const download = await downloadProductsFromCloud({ silent: true });
+    const buttons = await downloadQuickButtonsFromCloud({ silent: true });
     const upload = await uploadSalesToCloud({ silent: true });
-    setSyncMessage(`Sync complete. Products updated: ${download.updated}. Sales uploaded: ${upload.uploaded}.`);
+    setSyncMessage(`Sync complete. Products updated: ${download.updated}. Quick buttons: ${buttons.updated}. Sales uploaded: ${upload.uploaded}.`);
   } catch (error) {
     setSyncMessage(`Sync failed: ${error.message}`);
     alert(`Sync failed.\n${error.message}`);
   } finally {
     setSyncBusy(false);
+  }
+}
+
+async function autoSyncPosFromCloud() {
+  if (posAutoSyncInProgress || !canUsePosFromAppUser()) return;
+  posAutoSyncInProgress = true;
+  const previousStatus = elements.posScanStatus.textContent || "READY";
+  elements.posScanStatus.textContent = "SYNCING CLOUD";
+
+  try {
+    const products = await downloadProductsFromCloud({ silent: true });
+    const buttons = await downloadQuickButtonsFromCloud({ silent: true });
+    await uploadSalesToCloud({ silent: true });
+    elements.posScanStatus.textContent = `SYNCED ${products.updated.toLocaleString()} SKU / ${buttons.updated.toLocaleString()} BUTTONS`;
+  } catch (error) {
+    elements.posScanStatus.textContent = "SYNC FAILED";
+    console.warn("POS auto sync failed", error);
+    setSyncMessage(`POS auto sync failed: ${error.message}`);
+  } finally {
+    posAutoSyncInProgress = false;
+    window.setTimeout(() => {
+      if (elements.posScanStatus.textContent.startsWith("SYNC")) {
+        elements.posScanStatus.textContent = posSession.transactionActive ? "READY" : previousStatus;
+      }
+    }, 2500);
   }
 }
 
@@ -2066,6 +2134,41 @@ async function downloadProductsFromCloud(options = {}) {
   }
 }
 
+async function downloadQuickButtonsFromCloud(options = {}) {
+  if (!options.silent) setSyncBusy(true, "Downloading quick buttons...");
+
+  try {
+    const rows = await supabaseRequest(
+      "/rest/v1/pos_quick_buttons?select=sku_code,label,price,sort_order,updated_at&is_active=eq.true&order=sort_order.asc,sku_code.asc"
+    );
+
+    posQuickButtons = rows.map((row) => ({
+      code: row.sku_code,
+      label: row.label || row.sku_code,
+      price: sanitizeMoney(row.price || 0),
+      createdAt: row.updated_at || new Date().toISOString(),
+    }));
+    savePosQuickButtons();
+    renderQuickButtons();
+    renderAdminQuickButtons();
+    renderQuickButtonSearchResults();
+    if (!options.silent) setSyncMessage(`Quick buttons downloaded. ${posQuickButtons.length.toLocaleString()} saved on this phone.`);
+    return { updated: posQuickButtons.length };
+  } catch (error) {
+    if (isQuickButtonCloudMissing(error)) {
+      if (!options.silent) setSyncMessage("Quick button cloud table is not set up yet. Local buttons remain available.");
+      return { updated: posQuickButtons.length, skipped: true };
+    }
+    if (!options.silent) {
+      setSyncMessage(`Quick button download failed: ${error.message}`);
+      alert(`Quick button download failed.\n${error.message}`);
+    }
+    throw error;
+  } finally {
+    if (!options.silent) setSyncBusy(false);
+  }
+}
+
 async function uploadSalesToCloud(options = {}) {
   if (!options.silent) setSyncBusy(true, "Uploading sales...");
 
@@ -2094,6 +2197,62 @@ async function uploadSalesToCloud(options = {}) {
   } finally {
     if (!options.silent) setSyncBusy(false);
   }
+}
+
+async function syncQuickButtonToCloud(button) {
+  if (!button) return;
+  try {
+    await supabaseRequest("/rest/v1/pos_quick_buttons?on_conflict=sku_code", {
+      method: "POST",
+      headers: {
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify({
+        sku_code: button.code,
+        label: button.label || button.code,
+        price: sanitizeMoney(button.price || 0),
+        sort_order: posQuickButtons.findIndex((item) => item.code === button.code) + 1,
+        is_active: true,
+        updated_by: appUser?.username || "admin",
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  } catch (error) {
+    if (isQuickButtonCloudMissing(error)) return;
+    alert(`Quick button saved on this phone but not synced to cloud.\n${error.message}`);
+  }
+}
+
+async function uploadLocalQuickButtonsToCloud() {
+  if (!isAdminUser() || !posQuickButtons.length) return;
+  for (const button of posQuickButtons) {
+    await syncQuickButtonToCloud(button);
+  }
+}
+
+async function removeQuickButtonFromCloud(button) {
+  if (!button) return;
+  try {
+    await supabaseRequest(`/rest/v1/pos_quick_buttons?sku_code=eq.${encodeURIComponent(button.code)}`, {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        is_active: false,
+        updated_by: appUser?.username || "admin",
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  } catch (error) {
+    if (isQuickButtonCloudMissing(error)) return;
+    alert(`Quick button removed on this phone but not synced to cloud.\n${error.message}`);
+  }
+}
+
+function isQuickButtonCloudMissing(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("pos_quick_buttons") || message.includes("schema cache");
 }
 
 async function fetchProductPage(offset, batchSize) {

@@ -87,8 +87,15 @@ values
   ('admin', 'Admin', 'admin', null, crypt('Admin@12345', gen_salt('bf')), true, true),
   ('manager1', 'Manager 1', 'manager', null, crypt('Manager@12345', gen_salt('bf')), true, true),
   ('branchhead1', 'Branch Head 1', 'branch_head', null, crypt('Branch@12345', gen_salt('bf')), true, true),
-  ('crew1', 'Crew 1', 'crew', null, crypt('Crew@12345', gen_salt('bf')), false, true)
+  ('crew1', 'Crew 1', 'crew', null, crypt('Crew@12345', gen_salt('bf')), true, true)
 on conflict (username) do nothing;
+
+-- Crew can log in once to the app shell, but the app UI limits crew to POS.
+update public.staff_users
+set can_login_app = true,
+    can_use_pos = true,
+    updated_at = now()
+where role = 'crew';
 
 -- To add another cashier later, run this and change the values:
 -- insert into public.staff_users (username, display_name, role, branch_name, password_hash, can_login_app, can_use_pos)
